@@ -29,7 +29,7 @@ namespace DVSurvival.Tests
                     Amount = 20f, SecondaryAmount = 1.8f, SessionId = "current-host-epoch"
                 }
             }, new SurvivalActionPacket());
-            Assert.Equal(23, copy.Request.Protocol);
+            Assert.Equal(26, copy.Request.Protocol);
             Assert.Equal(TraumaKind.TrainDismount, copy.Request.Trauma);
             Assert.Equal(20f, copy.Request.Amount);
         }
@@ -44,7 +44,7 @@ namespace DVSurvival.Tests
                     Amount = 10f, SessionId = "current-host-epoch", RequestId = 19u
                 }
             }, new SurvivalActionPacket());
-            Assert.Equal(23, copy.Request.Protocol);
+            Assert.Equal(26, copy.Request.Protocol);
             Assert.Equal(SurvivalActionKind.SleepWithoutTimeAdvance, copy.Request.Action);
             Assert.Equal(10f, copy.Request.Amount);
             Assert.Equal(0L, copy.Request.CalendarBeforeTicks);
@@ -53,30 +53,36 @@ namespace DVSurvival.Tests
             Assert.Equal(19u, copy.Request.RequestId);
         }
 
-        [Fact]
-        public void OldStateProtocolIsRejectedBeforeParsingAnIncompatiblePayload()
+        [Theory]
+        [InlineData(17)]
+        [InlineData(24)]
+        [InlineData(25)]
+        public void OldStateProtocolIsRejectedBeforeParsingAnIncompatiblePayload(int protocol)
         {
             using (var stream = new MemoryStream())
             {
-                new BinaryWriter(stream).Write(17);
+                new BinaryWriter(stream).Write(protocol);
                 stream.Position = 0;
                 var packet = new SurvivalStatePacket();
                 packet.Deserialize(new BinaryReader(stream));
                 Assert.Equal(SurvivalResultCode.ProtocolMismatch, packet.Message.Result);
-                Assert.Equal(17, packet.Message.Protocol);
+                Assert.Equal(protocol, packet.Message.Protocol);
             }
         }
 
-        [Fact]
-        public void OldActionProtocolIsRejectedBeforeReadingNewCalendarFields()
+        [Theory]
+        [InlineData(17)]
+        [InlineData(24)]
+        [InlineData(25)]
+        public void OldActionProtocolIsRejectedBeforeReadingNewCalendarFields(int protocol)
         {
             using (var stream = new MemoryStream())
             {
-                new BinaryWriter(stream).Write(17);
+                new BinaryWriter(stream).Write(protocol);
                 stream.Position = 0;
                 var packet = new SurvivalActionPacket();
                 packet.Deserialize(new BinaryReader(stream));
-                Assert.Equal(17, packet.Request.Protocol);
+                Assert.Equal(protocol, packet.Request.Protocol);
                 Assert.Equal(0u, packet.Request.RequestId);
             }
         }
@@ -139,7 +145,7 @@ namespace DVSurvival.Tests
             Assert.Equal(99u, copy.Message.State.Revision);
             Assert.Equal(126.75d, copy.Message.State.LowRestGameHours);
             Assert.Equal(2.25f, copy.Message.State.ExhaustionHoursRemaining);
-            Assert.Equal(23, copy.Message.Protocol);
+            Assert.Equal(26, copy.Message.Protocol);
             Assert.Equal(6, copy.Message.State.CoffeeUsesSinceSleep);
         }
 
@@ -257,6 +263,9 @@ namespace DVSurvival.Tests
         [InlineData(17)]
         [InlineData(21)]
         [InlineData(22)]
+        [InlineData(23)]
+        [InlineData(24)]
+        [InlineData(25)]
         public void OldEnvironmentPacketIsRejectedBeforeReadingTravelFields(int protocol)
         {
             using (var stream = new MemoryStream())

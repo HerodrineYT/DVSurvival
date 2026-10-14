@@ -10,6 +10,7 @@ namespace DVSurvival.Tests
         [Theory]
         [InlineData(ProvisionKind.Meal)] [InlineData(ProvisionKind.Water)]
         [InlineData(ProvisionKind.Coffee)] [InlineData(ProvisionKind.FirstAid)] [InlineData(ProvisionKind.HeatPack)]
+        [InlineData(ProvisionKind.CannedFood)] [InlineData(ProvisionKind.Tea)]
         public void EntireRotatedProductionModelIsInsideReservedShelfSpace(ProvisionKind kind)
         {
             var vertices = ProvisionGeometry.Create(kind).Vertices;

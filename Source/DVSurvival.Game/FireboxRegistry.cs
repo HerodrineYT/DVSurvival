@@ -7,7 +7,6 @@ namespace DVSurvival.Mod
     internal static class FireboxRegistry
     {
         private static readonly List<FireboxSimController> entries = new List<FireboxSimController>();
-        private static float nextScan;
 
         internal static void Register(FireboxSimController firebox)
         {
@@ -16,17 +15,13 @@ namespace DVSurvival.Mod
 
         internal static List<FireboxSimController> GetLoaded()
         {
-            if (Time.realtimeSinceStartup >= nextScan)
-            {
-                nextScan = Time.realtimeSinceStartup + 30f;
-                foreach (var firebox in Object.FindObjectsOfType<FireboxSimController>()) Register(firebox);
-            }
+            ClimateSceneDiscovery.EnsureInitialized();
             // Keep inactive pooled locomotives: reactivation need not rerun Init.
             for (var i = entries.Count - 1; i >= 0; i--)
                 if (entries[i] == null) entries.RemoveAt(i);
             return entries;
         }
 
-        internal static void Reset() { entries.Clear(); nextScan = 0f; }
+        internal static void Reset() { entries.Clear(); }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Collections.Generic;
 
 internal static class VerifyAssemblyLoad
 {
@@ -15,6 +16,12 @@ internal static class VerifyAssemblyLoad
         }
         bool offline = args.Length == 7 && args[6] == "--offline";
         searchDirectories = offline ? new[] { args[0], args[1], args[2], args[4], args[5] } : args;
+        var seasonsDirectory = Path.Combine(Directory.GetParent(Directory.GetParent(args[1]).FullName).FullName, "Mods", "DVSeasons");
+        if (Directory.Exists(seasonsDirectory))
+        {
+            var directories = new List<string>(searchDirectories); directories.Add(seasonsDirectory);
+            searchDirectories = directories.ToArray();
+        }
         AppDomain.CurrentDomain.AssemblyResolve += ResolveAssembly;
         try
         {
@@ -31,6 +38,7 @@ internal static class VerifyAssemblyLoad
             Console.WriteLine("OK: per-item description implements native IInventoryItemLocalizer");
             var bindingsAssembly = Assembly.LoadFrom(Path.Combine(args[0], "DVSurvival.dll"));
             var settingsType = bindingsAssembly.GetType("DVSurvival.Mod.SurvivalModSettings", true);
+            VerifySeasonsAdapter(bindingsAssembly, seasonsDirectory);
             VerifyNeedsConsumptionSetting(settingsType);
             if (bindingsAssembly.GetType("DVSurvival.Mod.CabControlBindings", false) != null ||
                 settingsType.GetField("HeaterButtons") != null || settingsType.GetField("FanButtons") != null)
@@ -200,8 +208,9 @@ internal static class VerifyAssemblyLoad
             RequirePng(assembly, "thermal", 256, 8);
             RequirePng(assembly, "provisions", 2048, 512, "DVSurvival.Items.");
             RequirePng(assembly, "provisions-en", 2048, 512, "DVSurvival.Items.");
-            RequirePng(assembly, "inventory-ru", 1280, 512, "DVSurvival.Items.");
-            RequirePng(assembly, "inventory-en", 1280, 512, "DVSurvival.Items.");
+            RequirePng(assembly, "provisions-materials", 2048, 512, "DVSurvival.Items.");
+            RequirePng(assembly, "inventory-ru", 1792, 512, "DVSurvival.Items.");
+            RequirePng(assembly, "inventory-en", 1792, 512, "DVSurvival.Items.");
         }
         Console.WriteLine("OK: loaded {0} types from {1}", types.Length, assembly.GetName().Name);
     }
@@ -231,6 +240,16 @@ internal static class VerifyAssemblyLoad
         var defaults = Activator.CreateInstance(settingsType);
         if ((bool)field.GetValue(defaults)) throw new InvalidOperationException("Consumption must default to enabled.");
         field.SetValue(defaults, true);
+        var positionsField = settingsType.GetField("HudPanelPositions");
+        var positions = (Array)positionsField.GetValue(defaults);
+        if (positions.Length != 18) throw new Exception("HUD positions missing for some styles/panels.");
+        for (int i = 0; i < positions.Length; i++)
+        {
+            var position = positions.GetValue(i); var positionType = position.GetType();
+            positionType.GetField("IsCustom").SetValue(position, true);
+            positionType.GetField("X").SetValue(position, i / 20f);
+            positionType.GetField("Y").SetValue(position, 1f - i / 20f);
+        }
         object loaded;
         using (var xml = new StringWriter())
         {
@@ -238,16 +257,60 @@ internal static class VerifyAssemblyLoad
             loaded = serializer.Deserialize(new StringReader(xml.ToString()));
         }
         var tuning = settingsType.GetMethod("ToTuning").Invoke(loaded, null);
+        var restoredPositions = (Array)positionsField.GetValue(loaded);
+        for (int i = 0; i < restoredPositions.Length; i++)
+        {
+            var p = restoredPositions.GetValue(i); var type = p.GetType();
+            if (!(bool)type.GetField("IsCustom").GetValue(p) ||
+                (float)type.GetField("X").GetValue(p) != i / 20f ||
+                (float)type.GetField("Y").GetValue(p) != 1f - i / 20f)
+                throw new Exception("HUD layout did not survive actual UMM settings serialization.");
+        }
+        Console.WriteLine("OK: all 18 local HUD positions survive actual UMM settings XML round-trip");
         if (!(bool)field.GetValue(loaded) ||
             !(bool)tuning.GetType().GetField("DisableNeedsConsumption").GetValue(tuning))
             throw new InvalidOperationException("Saved consumption setting did not reach simulation tuning.");
         var legacy = serializer.Deserialize(new StringReader("<SurvivalModSettings />"));
         if ((bool)field.GetValue(legacy)) throw new InvalidOperationException("Legacy settings changed consumption default.");
         Console.WriteLine("OK: needs consumption setting persists, maps to tuning and keeps legacy defaults");
+        var cacheProperty = settingsType.GetProperty("CachedTuning");
+        var rulesProperty = settingsType.GetProperty("CachedRules");
+        var rulesType = rulesProperty.PropertyType;
+        var cached = cacheProperty.GetValue(loaded, null);
+        if (!object.ReferenceEquals(cached, cacheProperty.GetValue(loaded, null)))
+            throw new Exception("Repeated tuning read allocated a new snapshot.");
+        foreach (string name in new[] { "DisableNeedsConsumption", "NeedsRateMultiplier", "DamageMultiplier",
+            "TemperatureChangeMultiplier", "HungerHoursFromFull", "HydrationHoursFromFull", "RestHoursFromFull",
+            "MealPrice", "WaterPrice", "CoffeePrice", "FirstAidPrice", "HeatPackPrice", "CannedFoodPrice", "TeaPrice" })
+        {
+            var changed = settingsType.GetField(name);
+            var value = changed.GetValue(loaded);
+            changed.SetValue(loaded, changed.FieldType == typeof(bool) ? (object)!(bool)value :
+                changed.FieldType == typeof(float) ? (object)((float)value + .1f) : (object)((int)value + 1));
+            var updated = cacheProperty.GetValue(loaded, null);
+            if (object.ReferenceEquals(cached, updated)) throw new Exception("Stale tuning after " + name);
+            var owned = settingsType.GetMethod("ToTuning").Invoke(loaded, null);
+            foreach (var tuningField in owned.GetType().GetFields())
+                if (!object.Equals(tuningField.GetValue(owned), tuningField.GetValue(updated)))
+                    throw new Exception("Cached tuning differs in " + tuningField.Name);
+            var rules = rulesProperty.GetValue(loaded, null);
+            var expectedRules = Activator.CreateInstance(rulesType, new[] { owned });
+            foreach (var rulesField in rulesType.GetFields())
+                if (!object.Equals(rulesField.GetValue(expectedRules), rulesField.GetValue(rules)))
+                    throw new Exception("Cached value rules differ in " + rulesField.Name + " after " + name);
+            cached = updated;
+        }
+        Console.WriteLine("OK: cached tuning reuses stable settings and invalidates every simulation/price field");
+        Console.WriteLine("OK: immutable simulation rules track all settings changes");
     }
 
     private static void VerifyGameApis(string managedDirectory, string multiplayerDirectory)
     {
+        foreach (var entry in new[] { new[] { "Shop", "Awake" }, new[] { "DV.BedSleeping", "Start" },
+            new[] { "DV.PostProcessingVolumeAOController", "OnEnable" }, new[] { "TutorialPlayerDetector", "Awake" },
+            new[] { "DV.Simulation.Cars.FireboxSimController", "Init" } })
+            RequireMethod(Path.Combine(managedDirectory, "Assembly-CSharp.dll"), entry[0], entry[1],
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         var nativeUi = Assembly.LoadFrom(Path.Combine(managedDirectory, "DV.UI.dll"));
         var hudManager = nativeUi.GetType("DV.UI.LocoHUD.HUDManager", true);
         var locoControls = nativeUi.GetType("DV.UI.LocoHUD.HUDLocoControls", true);
@@ -357,5 +420,55 @@ internal static class VerifyAssemblyLoad
             if (File.Exists(candidate)) return Assembly.LoadFrom(candidate);
         }
         return null;
+    }
+
+    private static void VerifySeasonsAdapter(Assembly survival, string directory)
+    {
+        var path = Path.Combine(directory, "DVSeasons.dll");
+        if (!File.Exists(path)) return;
+        var seasons = Assembly.LoadFrom(path);
+        var main = seasons.GetType("DVSeasons.Mod.Main", true);
+        var runtimeField = main.GetField("runtime", BindingFlags.NonPublic | BindingFlags.Static);
+        if (runtimeField == null) throw new Exception("DVSeasons runtime binding missing.");
+        var current = runtimeField.FieldType.GetProperty("CurrentState");
+        var weather = runtimeField.FieldType.GetProperty("HasWeatherTemperature");
+        if (current == null || weather == null || weather.PropertyType != typeof(bool))
+            throw new Exception("DVSeasons state/weather-temperature properties are incompatible.");
+        var temperature = current.PropertyType.GetProperty("TemperatureCelsius");
+        var season = current.PropertyType.GetProperty("Current");
+        if (temperature == null || temperature.PropertyType != typeof(float) || season == null ||
+            !season.PropertyType.IsEnum || !Enum.IsDefined(season.PropertyType, "Winter"))
+            throw new Exception("DVSeasons temperature/season snapshot is incompatible.");
+        var adapterType = survival.GetType("DVSurvival.Mod.DvSeasonsTemperatureProvider", true);
+        var adapter = Activator.CreateInstance(adapterType, true);
+        adapterType.GetMethod("Probe", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(adapter, null);
+        foreach (string field in new[] { "runtimeField", "currentStateProperty", "weatherTemperatureProperty", "temperatureProperty", "seasonProperty" })
+            if (adapterType.GetField(field, BindingFlags.NonPublic | BindingFlags.Instance).GetValue(adapter) == null)
+                throw new Exception("Production DVSeasons adapter failed to bind " + field);
+        var previousRuntime = runtimeField.GetValue(null);
+        try
+        {
+            var runtime = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(runtimeField.FieldType);
+            var stateField = runtimeField.FieldType.GetField("currentState", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (stateField == null) throw new Exception("Could not construct installed Seasons snapshot fixture.");
+            var winter = Enum.Parse(season.PropertyType, "Winter");
+            var summer = Enum.Parse(season.PropertyType, "Summer");
+            runtimeField.SetValue(null, runtime);
+            foreach (var value in new[] { -25f, 12f })
+            {
+                var selected = value < 0 ? winter : summer;
+                var snapshot = Activator.CreateInstance(current.PropertyType, new[] {
+                    (object)0d, selected, selected, 0f, 0f, value, 0f });
+                stateField.SetValue(runtime, snapshot);
+                var sampleArgs = new object[] { 0f };
+                if (!(bool)adapterType.GetMethod("TryGetTemperature").Invoke(adapter, sampleArgs) ||
+                    !Equals(sampleArgs[0], value)) throw new Exception("Installed Seasons temperature was not read correctly.");
+                var winterArgs = new object[] { false };
+                if (!(bool)adapterType.GetMethod("TryGetWinter").Invoke(adapter, winterArgs) ||
+                    !Equals(winterArgs[0], value < 0)) throw new Exception("Installed Seasons season was not read correctly.");
+            }
+        }
+        finally { runtimeField.SetValue(null, previousRuntime); }
+        Console.WriteLine("OK: production temperature adapter reads installed DVSeasons " + seasons.GetName().Version + " cold/warm snapshots and seasons");
     }
 }

@@ -63,11 +63,10 @@ namespace DVSurvival.Mod
                 "DVSurvival.Hud." + name + ".png"))
             {
                 if (stream == null) throw new InvalidOperationException("Missing HUD artwork: " + name);
-                using (var buffer = new MemoryStream())
                 {
-                    stream.CopyTo(buffer);
+                    var bytes = EmbeddedBytes.Read(stream);
                     var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                    if (!ImageConversion.LoadImage(texture, buffer.ToArray(), true))
+                    if (!ImageConversion.LoadImage(texture, bytes, true))
                     {
                         UnityEngine.Object.Destroy(texture);
                         throw new InvalidOperationException("Invalid HUD artwork: " + name);

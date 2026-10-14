@@ -74,6 +74,8 @@ namespace DVSurvival.Mod
                 case ProvisionKind.Coffee: return Key("Coffee");
                 case ProvisionKind.FirstAid: return Key("First aid");
                 case ProvisionKind.HeatPack: return Key("Heat pack");
+                case ProvisionKind.CannedFood: return Key("Canned food");
+                case ProvisionKind.Tea: return Key("Tea flask");
                 default: return Key("Unknown");
             }
         }
@@ -97,6 +99,12 @@ namespace DVSurvival.Mod
                 case ProvisionKind.HeatPack: return Text(
                     "Температура тела 37 °C и временная защита от холода. ЛКМ: применение 3 с, расход целиком. ПКМ/убрать — отмена.",
                     "Sets body to 37 °C; temporary cold protection. LMB: apply for 3 s, uses the whole pack. RMB/put away cancels.");
+                case ProvisionKind.CannedFood: return Text(
+                    "До +60% сытости. Удерживайте ЛКМ, чтобы есть (6 с на банку). Отпустите — остаток сохранится.",
+                    "Up to +60% food. Hold LMB to eat (6 s per can). Release to keep the remainder.");
+                case ProvisionKind.Tea: return Text(
+                    "До +35% воды; согревает на 0,15 °C, не выше 37 °C. ЛКМ: пить частями (3 с). Не заменяет сон. Остаток сохраняется.",
+                    "Up to +35% water; warms by 0.15 °C, max 37 °C. LMB: sip (3 s). Does not replace sleep. Remainder is kept.");
                 default: return string.Empty;
             }
         }
@@ -110,6 +118,8 @@ namespace DVSurvival.Mod
                 case ProvisionKind.Coffee: return Key("Up to +16% rest, +15% water; +0.2 °C, max 37 °C. LMB: sip (3 s). First 5 cups: 100%; from cup 6: −5% per cup until sleep. Counts from first sip.");
                 case ProvisionKind.FirstAid: return Key("Up to +40% health over 20 s. LMB: 8 s preparation, then uses the whole kit. RMB/put away cancels preparation. Healing does not stack.");
                 case ProvisionKind.HeatPack: return Key("Sets body to 37 °C; temporary cold protection. LMB: apply for 3 s, uses the whole pack. RMB/put away cancels.");
+                case ProvisionKind.CannedFood: return Key("Up to +60% food. Hold LMB to eat (6 s per can). Release to keep the remainder.");
+                case ProvisionKind.Tea: return Key("Up to +35% water; warms by 0.15 °C, max 37 °C. LMB: sip (3 s). Does not replace sleep. Remainder is kept.");
                 default: return ProvisionKey(kind);
             }
         }
@@ -128,6 +138,8 @@ namespace DVSurvival.Mod
                 case ProvisionKind.Coffee: return Text("Кофе", "Coffee");
                 case ProvisionKind.FirstAid: return Text("Аптечка", "First aid");
                 case ProvisionKind.HeatPack: return Text("Грелка", "Heat pack");
+                case ProvisionKind.CannedFood: return Text("Консервы", "Canned food");
+                case ProvisionKind.Tea: return Text("Термос с чаем", "Tea flask");
                 default: return Text("Неизвестно", "Unknown");
             }
         }
@@ -141,6 +153,7 @@ namespace DVSurvival.Mod
                     case "meal_used": return Text("Вы поели.", "You ate a meal.");
                     case "water_used": return Text("Вы выпили воду.", "You drank water.");
                     case "coffee_used": return Text("Кофе немного отогнал сон.", "Coffee pushed back the fatigue.");
+                    case "tea_used": return Text("Вы выпили чай.", "You drank tea.");
                     case "first_aid_used": return Text("Раны обработаны.", "Injuries treated.");
                     case "heat_pack_used": return Text("Грелка начала действовать.", "The heat pack is warming you.");
                     case "purchase_ok": return Text("Покупка добавлена в личный запас.", "Purchase added to your personal supplies.");

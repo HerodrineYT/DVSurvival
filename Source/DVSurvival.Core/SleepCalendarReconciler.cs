@@ -165,6 +165,7 @@ namespace DVSurvival.Core
 
         private readonly List<PendingJump> pendingJumps = new List<PendingJump>();
         private readonly List<SleepCalendarSleep> pendingSleeps = new List<SleepCalendarSleep>();
+        private readonly List<SleepCalendarSleep> committedScratch = new List<SleepCalendarSleep>(32);
         private readonly HashSet<uint> seenJumpSequences = new HashSet<uint>();
         private readonly Queue<uint> seenJumpSequenceOrder = new Queue<uint>();
         private readonly Dictionary<byte, HashSet<uint>> seenSleepRequests =
@@ -273,6 +274,7 @@ namespace DVSurvival.Core
         public IReadOnlyList<SleepCalendarOperation> DrainOperations(double nowSeconds)
         {
             ValidateTimestamp(nowSeconds, nameof(nowSeconds));
+            if (pendingJumps.Count == 0 && pendingSleeps.Count == 0) return NoOperations;
 
             var drainCount = ReadyPrefixLength(nowSeconds);
             if (drainCount > 0)
@@ -294,7 +296,8 @@ namespace DVSurvival.Core
                 }
             }
 
-            var committedSleeps = new List<SleepCalendarSleep>();
+            var committedSleeps = committedScratch;
+            committedSleeps.Clear();
             if (drainCount > 0)
             {
                 for (var i = 0; i < pendingSleeps.Count; i++)
@@ -343,6 +346,7 @@ namespace DVSurvival.Core
         {
             pendingJumps.Clear();
             pendingSleeps.Clear();
+            committedScratch.Clear();
             seenJumpSequences.Clear();
             seenJumpSequenceOrder.Clear();
             seenSleepRequests.Clear();

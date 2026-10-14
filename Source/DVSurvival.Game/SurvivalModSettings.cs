@@ -16,6 +16,7 @@ namespace DVSurvival.Mod
         public float HudScale = 1f;
         public int HudStyle = HudLayout.Legacy;
         public float CompactHudScale = 1.75f;
+        public HudPanelPosition[] HudPanelPositions = HudPlacement.ValidatePositions(null);
         public bool HudLegacyRestored = false;
         public bool DisableNeedsConsumption = false;
         public float NeedsRateMultiplier = 1f;
@@ -31,6 +32,8 @@ namespace DVSurvival.Mod
         public int CoffeePrice = 75;
         public int FirstAidPrice = 350;
         public int HeatPackPrice = 120;
+        public int CannedFoodPrice = 125;
+        public int TeaPrice = 55;
 
         public bool EnsureIdentity()
         {
@@ -38,6 +41,44 @@ namespace DVSurvival.Mod
             if (Guid.TryParse(IdentityId, out parsed) && parsed != Guid.Empty) return false;
             IdentityId = Guid.NewGuid().ToString("D");
             return true;
+        }
+
+        [NonSerialized] private SurvivalTuning cachedTuning;
+        [NonSerialized] private SurvivalTuning rulesSource;
+        [NonSerialized] private DVSurvival.Core.Simulation.SimulationRules cachedRules;
+        [System.Xml.Serialization.XmlIgnore]
+        public DVSurvival.Core.Simulation.SimulationRules CachedRules
+        {
+            get
+            {
+                var source = CachedTuning;
+                if (!ReferenceEquals(source, rulesSource))
+                {
+                    cachedRules = new DVSurvival.Core.Simulation.SimulationRules(source);
+                    rulesSource = source;
+                }
+                return cachedRules;
+            }
+        }
+        // Compare the small set of public UMM fields: covers UI changes and external settings edits.
+        // ToTuning still returns an owned copy for HUD prediction and other mutating consumers.
+        [System.Xml.Serialization.XmlIgnore]
+        public SurvivalTuning CachedTuning
+        {
+            get
+            {
+                var t = cachedTuning;
+                if (t == null || t.DisableNeedsConsumption != DisableNeedsConsumption ||
+                    t.NeedsRateMultiplier != NeedsRateMultiplier || t.DamageMultiplier != DamageMultiplier ||
+                    t.ThermalTimeConstantHours != 1.5f / TemperatureChangeMultiplier ||
+                    t.HungerHoursFromFull != HungerHoursFromFull || t.HydrationHoursFromFull != HydrationHoursFromFull ||
+                    t.RestHoursFromFull != RestHoursFromFull || t.MealPrice != MealPrice ||
+                    t.WaterPrice != WaterPrice || t.CoffeePrice != CoffeePrice ||
+                    t.FirstAidPrice != FirstAidPrice || t.HeatPackPrice != HeatPackPrice ||
+                    t.CannedFoodPrice != CannedFoodPrice || t.TeaPrice != TeaPrice)
+                    cachedTuning = ToTuning();
+                return cachedTuning;
+            }
         }
 
         public SurvivalTuning ToTuning()
@@ -58,6 +99,8 @@ namespace DVSurvival.Mod
                 CoffeePrice = CoffeePrice,
                 FirstAidPrice = FirstAidPrice,
                 HeatPackPrice = HeatPackPrice,
+                CannedFoodPrice = CannedFoodPrice,
+                TeaPrice = TeaPrice,
                 StartingMeals = 0, StartingWater = 0, StartingCoffee = 0, StartingFirstAid = 0, StartingHeatPacks = 0
             };
             value.Clamp();
@@ -70,6 +113,7 @@ namespace DVSurvival.Mod
             HudScale = ClampFinite(HudScale, 0.65f, 1.75f, 1f);
             HudStyle = HudLayout.Validate(HudStyle);
             CompactHudScale = ClampFinite(CompactHudScale, 0.75f, 3f, 1.75f);
+            HudPanelPositions = HudPlacement.ValidatePositions(HudPanelPositions);
             // One-time return to the requested original HUD; later selections are preserved.
             if (!HudLegacyRestored) { HudStyle = HudLayout.Legacy; HudLegacyRestored = true; }
             NeedsRateMultiplier = ClampFinite(NeedsRateMultiplier, 0.25f, 3f, 1f);
@@ -85,6 +129,8 @@ namespace DVSurvival.Mod
             CoffeePrice = ClampInt(CoffeePrice, 0, 1000000);
             FirstAidPrice = ClampInt(FirstAidPrice, 0, 1000000);
             HeatPackPrice = ClampInt(HeatPackPrice, 0, 1000000);
+            CannedFoodPrice = ClampInt(CannedFoodPrice, 0, 1000000);
+            TeaPrice = ClampInt(TeaPrice, 0, 1000000);
         }
 
         public override void Save(UnityModManager.ModEntry modEntry)

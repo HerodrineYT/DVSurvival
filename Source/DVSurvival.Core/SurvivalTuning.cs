@@ -28,6 +28,8 @@ namespace DVSurvival.Core
         public int CoffeePrice = 75;
         public int FirstAidPrice = 350;
         public int HeatPackPrice = 120;
+        public int CannedFoodPrice = 125;
+        public int TeaPrice = 55;
 
         public int GetPrice(ProvisionKind kind)
         {
@@ -38,6 +40,8 @@ namespace DVSurvival.Core
                 case ProvisionKind.Coffee: return CoffeePrice;
                 case ProvisionKind.FirstAid: return FirstAidPrice;
                 case ProvisionKind.HeatPack: return HeatPackPrice;
+                case ProvisionKind.CannedFood: return CannedFoodPrice;
+                case ProvisionKind.Tea: return TeaPrice;
                 default: return -1;
             }
         }
@@ -66,6 +70,8 @@ namespace DVSurvival.Core
             CoffeePrice = ClampInt(CoffeePrice, 0, 1000000);
             FirstAidPrice = ClampInt(FirstAidPrice, 0, 1000000);
             HeatPackPrice = ClampInt(HeatPackPrice, 0, 1000000);
+            CannedFoodPrice = ClampInt(CannedFoodPrice, 0, 1000000);
+            TeaPrice = ClampInt(TeaPrice, 0, 1000000);
         }
 
         private static float ClampFinite(float value, float min, float max, float fallback)

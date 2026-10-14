@@ -9,11 +9,12 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $output = Join-Path $projectRoot 'artifacts\build\DVSurvival'
 $manifestSource = Join-Path $projectRoot 'DVSurvival.Game\info.source.json'
 $manifest = Get-Content -LiteralPath $manifestSource -Raw | ConvertFrom-Json
-$releaseVersion = '0.1.2'
-$protocolVersion = 23
+$releaseVersion = '0.1.3'
+$protocolVersion = 26
 
 if ($manifest.Id -ne 'DVSurvival') { throw 'Unexpected mod id in info.source.json.' }
 if ($manifest.Version -ne $releaseVersion) { throw 'Manifest version does not match this release.' }
+if ($manifest.HomePage -ne 'https://www.nexusmods.com/derailvalley/mods/1713') { throw 'HomePage must point to the requested Nexus Mods page.' }
 if ($manifest.MultiplayerCompatibility -ne 'All') { throw 'The mod must require matching host/client installs.' }
 if ('Multiplayer' -in $manifest.Requirements) { throw 'Multiplayer must remain optional.' }
 if ('custom_item_mod-0.2.0' -notin $manifest.Requirements) { throw 'Custom Item Mod 0.2.0 must be a required dependency.' }
@@ -36,13 +37,17 @@ $sourceRequired = @(
     'DVSurvival.Core\SurvivalConstants.cs',
     'DVSurvival.Core\CabHeaterActionValidator.cs',
     'DVSurvival.Core\SurvivalSimulator.cs',
+    'DVSurvival.Core\Simulation\NeedsEngine.cs',
+    'DVSurvival.Core\Runtime\PlayerSlots.cs',
+    'DVSurvival.Core\Runtime\SessionSchedule.cs',
+    'DVSurvival.Game\NeedsPresenter.cs',
     'DVSurvival.Game\SurvivalRuntime.cs',
     'DVSurvival.Game\EnvironmentSampler.cs',
     'DVSurvival.Game\CabHeaterSwitchSystem.cs',
     'DVSurvival.Game\PlayerImpactMonitor.cs',
     'DVSurvival.Game\SurvivalHud.cs',
     'DVSurvival.Multiplayer\MultiplayerSurvivalBridge.cs',
-    'Docs\RELEASE_0.1.2_RU.md',
+    'Docs\RELEASE_0.2.0_RU.md',
     'dependencies.lock.json',
     'README.md'
 )
@@ -65,6 +70,7 @@ foreach ($project in @('DVSurvival.Core\DVSurvival.Core.csproj',
 
 # Guard the frame-hot paths that caused the 0.1.0 FPS regression.
 $runtimeSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\SurvivalRuntime.cs') -Raw
+$runtimeSource += (Get-ChildItem -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\Runtime') -Filter 'SurvivalRuntime.*.cs' | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
 $environmentSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\EnvironmentSampler.cs') -Raw
 $impactSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\PlayerImpactMonitor.cs') -Raw
 $hudSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\SurvivalHud.cs') -Raw
@@ -79,6 +85,15 @@ $actionKindsSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurviva
 $packetsSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Multiplayer\SurvivalPackets.cs') -Raw
 $heaterSwitchSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\CabHeaterSwitchSystem.cs') -Raw
 $saveSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\SurvivalSaveData.cs') -Raw
+if ($runtimeSource -notmatch 'NeedsEngine\.Advance' -or
+    $runtimeSource -notmatch 'PlayerSlots<SurvivalPlayerRecord>' -or
+    $runtimeSource -notmatch 'schedule\.TakeSimulation' -or
+    $runtimeSource -notmatch 'schedule\.TakeTreatment' -or
+    $runtimeSource -notmatch 'state\.CopyTo\(currentState\)' -or
+    $hudSource -notmatch 'presenter\.Capture' -or
+    $calendarReconcilerSource -notmatch 'committedScratch\.Clear\(\)') {
+    throw 'Rebuilt simulation, storage, schedule or retained presentation is not connected.'
+}
 if ($runtimeSource -notmatch 'LocalEnvironmentIntervalSeconds' -or
     $runtimeSource -notmatch 'nextLocalEnvironmentUpdate') {
     throw 'The local environment sampler must remain rate-limited.'
@@ -98,7 +113,7 @@ if ($environmentSource -notmatch 'TrainCarType\.LocoDM1U' -or
     $environmentSource -notmatch 'heatingRateMultiplier = isDm1u && !fanOn \? 0\.25f : isDm3 \? heaterPower : 1f' -or
     $environmentSource -notmatch 'running && heaterAllowsEngineHeat' -or
     $environmentSource -notmatch 'if \(!isDm1u && cachedFirebox != null\)' -or
-    $environmentSource -notmatch 'normalized == "cheatingrotary"' -or
+    $environmentSource -notmatch 'NormalizedName.Contains\(name, "cheatingrotary", true\)' -or
     $climateSource -notmatch '!heaterEnabled' -or
     $climateSource -notmatch 'var artificialBoost' -or
     $climateSource -notmatch 'seconds \* heatingRateMultiplier') {
@@ -117,7 +132,7 @@ if ($calendarSource -notmatch 'MaximumObservedJumpHours = 168d' -or
     $runtimeSource -notmatch 'sleepCalendar\.TryRecordJump' -or
     $runtimeSource -notmatch 'sleepCalendar\.TryRecordOrderedAdvance' -or
     $runtimeSource -notmatch 'sleepCalendar\.TryRecordSleep' -or
-    $runtimeSource -notmatch 'DrainCalendarOperations\(Time\.realtimeSinceStartup\)' -or
+    $runtimeSource -notmatch 'DrainCalendarOperations\(now\)' -or
     $runtimeSource -notmatch 'sleepCalendar\.DrainOperations\(nowSeconds\)' -or
     $runtimeSource -notmatch 'SleepCalendarOperationKind\.CommitSleep' -or
     $runtimeSource -notmatch 'CommitPendingNativeSleep\(operation\.Sleep\)' -or
@@ -224,7 +239,9 @@ if ($actionKindsSource -notmatch 'SetCabHeater = 6' -or
     throw 'Host-authoritative CabHeater validation, persistence or protocol fields are incomplete.'
 }
 if ($impactSource -notmatch 'OverlapCapsuleNonAlloc' -or
-    $impactSource -notmatch 'TrainContactProbeIntervalSeconds') {
+    $impactSource -notmatch 'probeCadence.Interval\(now\)' -or
+    $impactSource -notmatch 'Physics.CheckSphere' -or
+    $impactSource -notmatch 'probeCadence.ObserveRisk\(dismountedAt\)') {
     throw 'Train contact fallback must remain non-allocating and rate-limited.'
 }
 if ($impactSource -notmatch 'Train_Big_Collider' -or
@@ -242,12 +259,12 @@ $officeSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Gam
 if ($environmentSource -notmatch 'stationOffices\.Contains\(BuildingProbePosition' -or
     $environmentSource -notmatch 'PlayerManager\.PlayerCamera\.transform\.position' -or
     $environmentSource -notmatch 'Mathf\.Max\(ambient, HeatedBuildingTemperature\)' -or
-    $officeSource -notmatch 'FindObjectsOfType<PostProcessingVolumeAOController>' -or
+    $officeSource -notmatch 'ClimateSceneDiscovery.EnsureInitialized\(\)' -or
     $officeSource -notmatch 'IsOfficeInterior\(controller\.transform\.parent\)' -or
     $officeSource -notmatch 'TutorialPlayerDetectorType\.StationOffice' -or
     $officeSource -notmatch 'InverseTransformPoint\(position\) - room\.center' -or
     $officeSource -notmatch 'room\.size \* \.5f' -or
-    $officeSource -notmatch 'nextScan = Time\.realtimeSinceStartup \+ 30f') {
+    $officeSource -match 'FindObjectsOfType') {
     throw 'Station offices must use cached authored room volumes, camera containment and a heating-only thermostat.'
 }
 $climateLifecycleSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\ClimateObjectLifecycle.cs') -Raw
@@ -259,7 +276,10 @@ if ($climateLifecycleSource -notmatch 'typeof\(PostProcessingVolumeAOController\
     $climateSceneSource -notmatch 'SceneManager.sceneLoaded \+=' -or
     $climateSceneSource -notmatch 'SceneManager.sceneLoaded -=' -or
     $climateSceneSource -notmatch 'scene.GetRootGameObjects' -or
-    $fireboxSource -notmatch 'nextScan = Time.realtimeSinceStartup \+ 30f' -or
+    $fireboxSource -match 'FindObjectsOfType' -or
+    $climateSceneSource -notmatch 'n < 64' -or
+    $climateLifecycleSource -notmatch 'typeof\(Shop\), "Awake"' -or
+    $climateLifecycleSource -notmatch 'typeof\(BedSleeping\), "Start"' -or
     $environmentSource -match 'FindObjectsOfType<FireboxSimController>' -or
     $environmentSource -notmatch 'cabScanRetry.RecordAttempt' -or
     $environmentSource -notmatch 'cabinStatus.Capture') {
@@ -324,7 +344,9 @@ if ($hudSource -notmatch '!LoadingScreenManager.IsLoading' -or
     $hudSource -notmatch '!FastTravelController.IsFastTravelling' -or
     $hudSource -notmatch '!runtime.IsHomeTravelPending' -or
     $hudSource -notmatch '!locoHudVisibility.BlocksSurvivalHud\(\)' -or
-    ([regex]::Matches($hudSource, 'if \(!CanDisplay\(\)\) return;').Count -ne 2)) {
+    ([regex]::Matches($hudSource, 'if \(!CanDisplay\(\)\) return;').Count -ne 1) -or
+    $hudSource -notmatch 'var visible = CanDisplay\(\);' -or
+    $hudSource -notmatch 'if \(!visible\) return;') {
     throw 'HUD drawing and refresh must stop during native travel, loading, pending home respawn and the locomotive menu.'
 }
 if ($bridgeSource -notmatch 'get \{ return isSupported; \}') {
@@ -336,7 +358,9 @@ if ($runtimeSource -notmatch 'RefreshLocalTravelPause\(\)' -or
     $runtimeSource -notmatch 'travelPause.Update\(player.PlayerId, report.IsTravelling' -or
     $runtimeSource -notmatch 'string.Equals\(report.SessionId, document.SessionId' -or
     $patchSource -notmatch 'runtime.RefreshLocalTravelPause\(\)' -or
-    $bridgeSource -notmatch 'new SurvivalEnvironmentPacket \{ Report = report \}, true') {
+    $bridgeSource -notmatch 'environmentDelivery.Prepare\(report' -or
+    $bridgeSource -notmatch 'new SurvivalEnvironmentPacket \{ Report = report \}, reliable' -or
+    $runtimeSource -notmatch 'order.Accept\(report.TravelRevision, report.IsTravelling\)') {
     throw 'Personal travel pause, deferred calendar protection or reliable session-scoped reports are missing.'
 }
 if ($mainSource -match '\[EnableReloading\]') {
@@ -344,7 +368,7 @@ if ($mainSource -match '\[EnableReloading\]') {
 }
 
 $catalogSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\CustomProvisionCatalog.cs') -Raw
-if ($catalogSource -notmatch 'Amount = 5' -or $catalogSource -notmatch 'i <= 5' -or
+if ($catalogSource -notmatch 'Amount = 5' -or $catalogSource -notmatch 'i < ProvisionCatalog.Count' -or
     $catalogSource -match 'ProvisionLocalizationPatch' -or
     $catalogSource -notmatch 'localizationKeyName = ModLocalization.ProvisionKey') { throw 'Native stock limits or Language Helper item terms are missing.' }
 $personalItemsSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\PersonalProvisionItems.cs') -Raw
@@ -362,16 +386,20 @@ if ($settingsSource -notmatch 'DisableNeedsConsumption = DisableNeedsConsumption
 if ($catalogSource -notmatch 'new ShelfDisplayLayout' -or
     $catalogSource -notmatch 'display.localPosition = new Vector3\(placement.OffsetX, placement.OffsetY, placement.OffsetZ\)' -or
     $catalogSource -notmatch 'shelfItem.height = placement.Height' -or
-    $layoutSource -notmatch 'DrawLegacy\(scale\)' -or
-    $hudSource -notmatch 'settings.CompactHudScale' -or
-    $mainSource -notmatch 'HorizontalSlider\(settings.CompactHudScale, 0.75f, 3f\)') {
-    throw 'Shelf sample centering, original HUD or separate new-layout scale slider is missing.'
+    $layoutSource -notmatch 'DrawLegacyNeeds\(0, 0\)' -or
+    $mainSource -notmatch 'HorizontalSlider\(settings.HudScale, 0.65f, 1.75f\)' -or
+    $mainSource -match 'HorizontalSlider\(settings.CompactHudScale') {
+    throw 'Shelf centering, original HUD artwork or unified scale slider is missing.'
 }
+$dragSource = Get-Content -LiteralPath (Join-Path $projectRoot 'DVSurvival.Game\SurvivalHud.Dragging.cs') -Raw
 if ($mainSource -notmatch 'GUILayout.SelectionGrid\(settings.HudStyle' -or
     $settingsSource -notmatch 'HudStyle = HudLayout.Validate' -or
-    $hudSource -notmatch 'DrawLayout\(scale\)' -or
+    $hudSource -notmatch 'DrawLayout\(scale\)' -or $dragSource -notmatch 'HudLayout.ContentScale' -or
+    $dragSource -notmatch 'Cursor.lockState != CursorLockMode.Locked' -or
+    $dragSource -notmatch 'runtime.SaveSettings\(\)' -or
+    $settingsSource -notmatch 'HudPanelPositions = HudPlacement.ValidatePositions' -or
     $layoutSource -match 'FindObjectsOfType|FindObjectOfType|new Texture2D|new GUIStyle|Resources.Load') {
-    throw 'HUD styles must be selectable, validated and reuse cached artwork/styles without scene scans.'
+    throw 'HUD styles must be selectable, draggable, locally persistent and reuse artwork/styles without scene scans.'
 }
 if ($catalogSource -match 'DVSurvival.Hud.icons.png' -or
     $catalogSource -notmatch 'PreviewPrefab = preview' -or

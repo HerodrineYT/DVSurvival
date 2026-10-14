@@ -37,9 +37,14 @@ namespace UnityEngine
     internal static class GUI
     {
         [ThreadStatic] public static List<object> Commands;
+        [ThreadStatic] public static float OffsetX, OffsetY, Scale;
+        [ThreadStatic] public static int Panel;
+        public static Rect Transform(Rect rect) => new Rect(OffsetX+rect.x*Scale, OffsetY+rect.y*Scale,
+            rect.width*Scale, rect.height*Scale);
         public static void Label(Rect rect, string text, GUIStyle style)
         {
-            Commands.Add(new { kind = "text", rect, text, style });
+            Commands.Add(new { kind = "text", panel=Panel, rect=Transform(rect), text,
+                style=new { style.align, style.font, size=style.size*Scale, bold=style.size==13 } });
         }
     }
 }
@@ -48,10 +53,10 @@ namespace DVSurvival.Mod
     internal sealed class PreviewSettings { public int HudStyle; }
     internal sealed class HudArtwork
     {
-        public void DrawIcon(Rect rect, int index, Color color) => GUI.Commands.Add(new { kind = "icon", rect, index, color });
-        public void DrawThermal(Rect rect) => GUI.Commands.Add(new { kind = "thermal", rect });
-        public void DrawRing(Rect rect, float value, Color color) => GUI.Commands.Add(new { kind = "ring", rect, value, color });
-        public void DrawDial(Rect rect, float value, Color color) => GUI.Commands.Add(new { kind = "dial", rect, value, color });
+        public void DrawIcon(Rect rect, int index, Color color) => GUI.Commands.Add(new { kind = "icon", panel=GUI.Panel, rect=GUI.Transform(rect), index, color });
+        public void DrawThermal(Rect rect) => GUI.Commands.Add(new { kind = "thermal", panel=GUI.Panel, rect=GUI.Transform(rect) });
+        public void DrawRing(Rect rect, float value, Color color) => GUI.Commands.Add(new { kind = "ring", panel=GUI.Panel, rect=GUI.Transform(rect), value, color });
+        public void DrawDial(Rect rect, float value, Color color) => GUI.Commands.Add(new { kind = "dial", panel=GUI.Panel, rect=GUI.Transform(rect), value, color });
     }
     internal sealed partial class SurvivalHud
     {
@@ -66,12 +71,13 @@ namespace DVSurvival.Mod
         private string ambientText = "Воздух: -3.1 °C";
         private string legacyBodyText = "Температура тела 37.0 °C";
         private float cachedBodyTemperature = 37, temperatureFraction = .5f;
-        private static void DrawSolid(Rect rect, Color color) => GUI.Commands.Add(new { kind = "solid", rect, color });
-        private void DrawPlate(Rect rect) => GUI.Commands.Add(new { kind = "plate", rect });
+        private static void DrawSolid(Rect rect, Color color) => GUI.Commands.Add(new { kind = "solid", panel=GUI.Panel, rect=GUI.Transform(rect), color });
+        private void DrawPlate(Rect rect) => GUI.Commands.Add(new { kind = "plate", panel=GUI.Panel, rect=GUI.Transform(rect), scale=GUI.Scale });
 
         internal List<object> RecordOverlays(int style)
         {
             GUI.Commands = new List<object>();
+            GUI.OffsetX=GUI.OffsetY=0; GUI.Scale=1; GUI.Panel=-1;
             settings.HudStyle = style;
             modernCenter = new GUIStyle { align = "center" };
             modernOverlayTitle = new GUIStyle { align = "center", size = 14 };
@@ -81,11 +87,11 @@ namespace DVSurvival.Mod
             return GUI.Commands;
         }
 
-        internal List<object> Record(int style, bool warning, bool english)
+        internal List<object> Record(int style, bool warning, bool english, HudPanelPosition[] positions=null)
         {
             GUI.Commands = new List<object>();
             settings.HudStyle = style;
-            Screen.height = style == HudLayout.Legacy ? 720 : 260;
+            Screen.height = 720;
             modernLeft = new GUIStyle(); modernCenter = new GUIStyle { align = "center" };
             modernNumber = new GUIStyle { align = "center", size = 13 }; modernSmall = new GUIStyle { size = 11 };
             compactBodyText = english ? "Body: 37.0 °C" : "Тело: 37.0 °C";
@@ -101,7 +107,16 @@ namespace DVSurvival.Mod
                 needFractions[0] = .1f;
                 needValues[0] = NeedAlertText.Format(new SurvivalState { Health = 10 }, 0, "10%", true);
             }
-            DrawLayout(1);
+            positions=HudPlacement.ValidatePositions(positions);
+            float scale=HudLayout.FitScale(style,1,Screen.width,Screen.height);
+            for(int panel=0;panel<HudPlacement.PanelCount;panel++)
+            {
+                var rect=HudPlacement.Resolve(positions[HudPlacement.Index(style,panel)],
+                    HudPlacement.Default(style,panel,scale,Screen.width,Screen.height),Screen.width,Screen.height);
+                GUI.OffsetX=rect.X; GUI.OffsetY=rect.Y; GUI.Panel=panel;
+                GUI.Scale=scale*(panel==HudPlacement.Needs?HudLayout.ContentScale(style):1);
+                DrawHudPanel(panel,HudLayout.Validate(style));
+            }
             return GUI.Commands;
         }
     }
@@ -130,8 +145,8 @@ namespace DVSurvival.Tests
                 foreach (var command in document.RootElement.EnumerateArray())
                 {
                     var rect = command.GetProperty("rect");
-                    Assert.InRange(rect.GetProperty("x").GetSingle(), 20, 20 + HudLayout.Width(style));
-                    Assert.True(rect.GetProperty("x").GetSingle() + rect.GetProperty("width").GetSingle() <= 20 + HudLayout.Width(style));
+                    Assert.InRange(rect.GetProperty("x").GetSingle(), 0, Screen.width);
+                    Assert.True(rect.GetProperty("x").GetSingle() + rect.GetProperty("width").GetSingle() <= Screen.width);
                     Assert.InRange(rect.GetProperty("y").GetSingle(), 0, Screen.height - 20);
                     Assert.True(rect.GetProperty("y").GetSingle() + rect.GetProperty("height").GetSingle() <= Screen.height - 20);
                 }
@@ -209,18 +224,20 @@ namespace DVSurvival.Tests
                 new[] { "Здоровье", "Сытость", "Вода", "Сон" };
             for (var i = 0; i < 4; i++)
             {
-                var dx = 29f + 66f * i;
-                var y = 240f - HudLayout.Height(style);
-                AssertRect(rings[i].GetProperty("rect"), dx, y + (style == 0 ? 30f : 33f), 62f, 62f);
-                AssertRect(icons[i].GetProperty("rect"), dx + 21f, y + (style == 0 ? 41f : 46f), 20f, 20f);
-                AssertRect(numbers[i].GetProperty("rect"), dx + 11f, y + (style == 0 ? 62f : 67f), 40f, 16f);
+                var root=HudPlacement.Default(style,HudPlacement.Needs,1,Screen.width,Screen.height);
+                var s=HudLayout.ContentScale(style);
+                var dx = root.X + (9f + 66f * i)*s;
+                var y = root.Y;
+                AssertRect(rings[i].GetProperty("rect"), dx, y + (style == 0 ? 30f : 33f)*s, 62f*s, 62f*s);
+                AssertRect(icons[i].GetProperty("rect"), dx + 21f*s, y + (style == 0 ? 41f : 46f)*s, 20f*s, 20f*s);
+                AssertRect(numbers[i].GetProperty("rect"), dx + 11f*s, y + (style == 0 ? 62f : 67f)*s, 40f*s, 16f*s);
                 var name = all.Single(x => x.GetProperty("kind").GetString() == "text" &&
                     x.GetProperty("text").GetString() == names[i]).GetProperty("rect");
-                AssertRect(name, dx - 2f, y + (style == 0 ? 102f : 105f), 66f, style == 0 ? 16f : 17f);
-                Assert.Equal(10f, name.GetProperty("y").GetSingle() -
-                    rings[i].GetProperty("rect").GetProperty("y").GetSingle() - 62f);
+                AssertRect(name, dx - 2f*s, y + (style == 0 ? 102f : 105f)*s, 66f*s, (style == 0 ? 16f : 17f)*s);
+                Assert.Equal(10f*s, name.GetProperty("y").GetSingle() -
+                    rings[i].GetProperty("rect").GetProperty("y").GetSingle() - 62f*s,3);
                 Assert.Equal("center", numbers[i].GetProperty("style").GetProperty("align").GetString());
-                Assert.Equal(style == 0 ? 13 : 12, numbers[i].GetProperty("style").GetProperty("size").GetInt32());
+                Assert.Equal((style == 0 ? 13 : 12)*s, numbers[i].GetProperty("style").GetProperty("size").GetSingle(),3);
             }
             }
         }
@@ -298,10 +315,10 @@ namespace DVSurvival.Tests
 
         private static void AssertRect(JsonElement rect, float x, float y, float width, float height)
         {
-            Assert.Equal(x, rect.GetProperty("x").GetSingle());
-            Assert.Equal(y, rect.GetProperty("y").GetSingle());
-            Assert.Equal(width, rect.GetProperty("width").GetSingle());
-            Assert.Equal(height, rect.GetProperty("height").GetSingle());
+            Assert.Equal(x, rect.GetProperty("x").GetSingle(),3);
+            Assert.Equal(y, rect.GetProperty("y").GetSingle(),3);
+            Assert.Equal(width, rect.GetProperty("width").GetSingle(),3);
+            Assert.Equal(height, rect.GetProperty("height").GetSingle(),3);
         }
 
         private static bool IntersectsWithClearance(JsonElement a, JsonElement b, float clearance)

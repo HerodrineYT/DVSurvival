@@ -19,7 +19,11 @@ namespace DVSurvival.Mod
             russianTexture = LoadTexture(assets, "provisions");
             englishTexture = LoadTexture(assets, "provisions-en");
             var texture = ModLocalization.IsRussian ? russianTexture : englishTexture;
-            return CreateOpaqueMaterial(shader, texture, assets);
+            var material = CreateOpaqueMaterial(shader, texture, assets);
+            material.SetTexture("_MetallicGlossMap", LoadTexture(assets, "provisions-materials", true));
+            material.SetFloat("_GlossMapScale", 1f);
+            material.EnableKeyword("_METALLICGLOSSMAP");
+            return material;
         }
 
         public static void RefreshLanguage()
@@ -33,16 +37,14 @@ namespace DVSurvival.Mod
 
         public static void Clear() { shared = null; russianTexture = englishTexture = null; }
 
-        private static Texture2D LoadTexture(List<Object> assets, string name)
+        private static Texture2D LoadTexture(List<Object> assets, string name, bool linear = false)
         {
-            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true) { name = "Survival printed packaging" };
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true, linear) { name = "Survival printed packaging" };
             assets.Add(texture);
             using (var stream = typeof(ProvisionModels).Assembly.GetManifestResourceStream("DVSurvival.Items." + name + ".png"))
-            using (var buffer = new MemoryStream())
             {
                 if (stream == null) throw new InvalidOperationException("Provision packaging atlas is missing.");
-                stream.CopyTo(buffer);
-                if (!ImageConversion.LoadImage(texture, buffer.ToArray(), true))
+                if (!ImageConversion.LoadImage(texture, EmbeddedBytes.Read(stream), true))
                     throw new InvalidOperationException("Invalid provision packaging atlas.");
             }
             texture.wrapMode = TextureWrapMode.Clamp;
@@ -77,17 +79,18 @@ namespace DVSurvival.Mod
             var data = ProvisionGeometry.Create(kind);
             var vertices = new Vector3[data.Vertices.Count];
             var uv = new Vector2[vertices.Length];
+            var normals = new Vector3[vertices.Length];
             for (int i = 0; i < vertices.Length; i++)
             {
                 var p = data.Vertices[i]; var t = data.TexCoords[i];
-                var size = kind == ProvisionKind.Meal || kind == ProvisionKind.Water ||
-                    kind == ProvisionKind.Coffee ? 0.8f : 1f;
-                vertices[i] = new Vector3(p.X, p.Y, p.Z) * size;
+                // Geometry is authored at its final physical size, including shelf/preview bounds.
+                vertices[i] = new Vector3(p.X, p.Y, p.Z);
                 uv[i] = new Vector2(t.U, t.V);
+                var normal = data.Normals[i];
+                normals[i] = new Vector3(normal.X, normal.Y, normal.Z);
             }
-            var mesh = new Mesh { name = "DVSurvival_" + kind, vertices = vertices, uv = uv, triangles = data.Triangles.ToArray() };
+            var mesh = new Mesh { name = "DVSurvival_" + kind, vertices = vertices, uv = uv, normals = normals, triangles = data.Triangles.ToArray() };
             assets.Add(mesh);
-            mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             var bounds = mesh.bounds;
             mesh.UploadMeshData(true);

@@ -45,28 +45,34 @@ namespace DVSurvival.Core
 
         public SurvivalState Clone()
         {
-            return new SurvivalState
-            {
-                Version = Version,
-                Hunger = Hunger,
-                Hydration = Hydration,
-                Rest = Rest,
-                Health = Health,
-                FirstAidSecondsRemaining = FirstAidSecondsRemaining,
-                BodyTemperatureCelsius = BodyTemperatureCelsius,
-                CaffeineHours = CaffeineHours,
-                CoffeeUsesSinceSleep = CoffeeUsesSinceSleep,
-                WarmthHours = WarmthHours,
-                LowRestGameHours = LowRestGameHours, ExhaustionHoursRemaining = ExhaustionHoursRemaining,
-                Meals = Meals,
-                Water = Water,
-                Coffee = Coffee,
-                FirstAid = FirstAid,
-                HeatPacks = HeatPacks,
-                Revision = Revision,
-                CollapseCount = CollapseCount,
-                SimulatedGameHours = SimulatedGameHours
-            };
+            var copy = new SurvivalState();
+            CopyTo(copy);
+            return copy;
+        }
+
+        public void CopyTo(SurvivalState target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+            target.Version = Version;
+            target.Hunger = Hunger;
+            target.Hydration = Hydration;
+            target.Rest = Rest;
+            target.Health = Health;
+            target.FirstAidSecondsRemaining = FirstAidSecondsRemaining;
+            target.BodyTemperatureCelsius = BodyTemperatureCelsius;
+            target.CaffeineHours = CaffeineHours;
+            target.CoffeeUsesSinceSleep = CoffeeUsesSinceSleep;
+            target.WarmthHours = WarmthHours;
+            target.LowRestGameHours = LowRestGameHours;
+            target.ExhaustionHoursRemaining = ExhaustionHoursRemaining;
+            target.Meals = Meals;
+            target.Water = Water;
+            target.Coffee = Coffee;
+            target.FirstAid = FirstAid;
+            target.HeatPacks = HeatPacks;
+            target.Revision = Revision;
+            target.CollapseCount = CollapseCount;
+            target.SimulatedGameHours = SimulatedGameHours;
         }
 
         public int GetProvisionCount(ProvisionKind kind)

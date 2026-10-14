@@ -21,6 +21,7 @@ public static class VerifyStationOffice
     public static void Run(string modDirectory)
     {
         var assembly = Assembly.LoadFrom(Path.Combine(modDirectory, "DVSurvival.dll"));
+        VerifyTravelModels(assembly);
         var game = Assembly.Load("Assembly-CSharp");
         var detectorType = game.GetType("TutorialPlayerDetector", true);
         var root = new GameObject("Room without office name");
@@ -67,9 +68,12 @@ public static class VerifyStationOffice
             Set(provider, "seasonProperty", typeof(FakeState).GetProperty("Current"));
             Set(provider, "weatherTemperatureProperty", typeof(FakeRuntime).GetProperty("HasWeatherTemperature"));
             var sample = samplerType.GetMethod("Sample", BindingFlags.Instance | BindingFlags.NonPublic);
+            var environmentType = Assembly.LoadFrom(Path.Combine(modDirectory, "DVSurvival.Core.dll"))
+                .GetType("DVSurvival.Core.SurvivalEnvironment", true);
             Func<Vector3, float, object> read = (position, outside) => {
                 Runtime.CurrentState.TemperatureCelsius = outside;
-                return sample.Invoke(sampler, new object[] { position, 0f, false, false, 0f, false, false });
+                var target = Activator.CreateInstance(environmentType);
+                return sample.Invoke(sampler, new object[] { target, position, 0f, false, false, 0f, false, false });
             };
 
             var inside = root.transform.position;
@@ -96,6 +100,7 @@ public static class VerifyStationOffice
             root.SetActive(false);
             Equal(-25, Number(read(root.transform.position, -25), "AmbientTemperatureCelsius"), "unloaded room ignored");
             VerifyStreamingCaches(assembly, game, sampler, read);
+            VerifyWorldRegistry(assembly, game, sampler);
             ((IDisposable)heaters).Dispose();
             Debug.Log("STATION_OFFICE_OK: authored AO office boxes, two-room gap, house exclusion, disabled native room, rotated/scaled containment, cold22, warm30, origin shift, unload");
         }
@@ -103,6 +108,47 @@ public static class VerifyStationOffice
         {
             UnityEngine.Object.DestroyImmediate(root); UnityEngine.Object.DestroyImmediate(unrelated);
             UnityEngine.Object.DestroyImmediate(regularOffice); UnityEngine.Object.DestroyImmediate(house);
+        }
+    }
+
+    private static void VerifyTravelModels(Assembly assembly)
+    {
+        var models = assembly.GetType("DVSurvival.Mod.ProvisionModels", true);
+        var core = Assembly.Load("DVSurvival.Core");
+        var kindType = core.GetType("DVSurvival.Core.ProvisionKind", true);
+        var assets = new System.Collections.Generic.List<UnityEngine.Object>();
+        try
+        {
+            var material = (Material)models.GetMethod("CreateMaterial").Invoke(null, new object[] { assets });
+            if (material.renderQueue != 2000 || material.GetInt("_ZWrite") != 1)
+                throw new Exception("Travel model material is not opaque/depth-writing.");
+            if (material.GetTexture("_MetallicGlossMap") == null || !material.IsKeywordEnabled("_METALLICGLOSSMAP"))
+                throw new Exception("Shared travel material surface map is missing.");
+            foreach (string name in new[] { "Meal", "Water", "Coffee", "FirstAid", "HeatPack", "CannedFood", "Tea" })
+            {
+                var root = (GameObject)models.GetMethod("Create").Invoke(null,
+                    new object[] { Enum.Parse(kindType, name), material, assets });
+                try
+                {
+                    if (root.GetComponentsInChildren<Renderer>(true).Length != 1 ||
+                        root.GetComponentsInChildren<Collider>(true).Length != 1)
+                        throw new Exception("Travel model must have one renderer/collider: " + name);
+                    var bounds = root.GetComponent<MeshFilter>().sharedMesh.bounds;
+                    if (bounds.size.x <= 0 || bounds.size.x > .18f || bounds.size.y <= 0 ||
+                        bounds.size.y > .22f || bounds.size.z <= 0 || bounds.size.z > .11f || bounds.min.y < -.001f)
+                        throw new Exception("Travel model dimensions are not compact: " + name);
+                    var collider = root.GetComponent<BoxCollider>();
+                    if ((collider.size - bounds.size).sqrMagnitude > .000001f)
+                        throw new Exception("Collider does not match actual mesh: " + name);
+                }
+                finally { UnityEngine.Object.DestroyImmediate(root); }
+            }
+            Debug.Log("TRAVEL_MODELS_OK: seven compact production meshes, one renderer/collider, shared opaque material and native bounds");
+        }
+        finally
+        {
+            models.GetMethod("Clear").Invoke(null, null);
+            foreach (var asset in assets) if (asset != null) UnityEngine.Object.DestroyImmediate(asset);
         }
     }
 
@@ -116,8 +162,9 @@ public static class VerifyStationOffice
         var loco = new GameObject("climate test firebox");
         try
         {
-            var officeDeadline = (float)StaticGet(offices, "nextScan");
-            if (officeDeadline - Time.realtimeSinceStartup < 20f) throw new Exception("Office reconciliation is not throttled.");
+            var discovery = assembly.GetType("DVSurvival.Mod.ClimateSceneDiscovery", true);
+            var officeDeadline = (float)StaticGet(discovery, "nextReconciliation");
+            if (officeDeadline - Time.realtimeSinceStartup < 120f) throw new Exception("Scene reconciliation is not throttled.");
             streamed.transform.position = new Vector3(12000, 0, 12000);
             AddOfficeVolumes(game, streamed);
             var controller = streamed.GetComponentInChildren(game.GetType("DV.PostProcessingVolumeAOController"), true);
@@ -128,12 +175,12 @@ public static class VerifyStationOffice
             InvokeStatic(assembly.GetType("DVSurvival.Mod.RegisterOfficeClimatePatch"), "Postfix", controller);
             Equal(count, rooms.Count, "duplicate room registration");
             var inside = streamed.transform.TransformPoint(new Vector3(-3, 0, 0));
-            Equal(22, Number(read(inside, -25), "AmbientTemperatureCelsius"), "room registered before 30s fallback");
+            Equal(22, Number(read(inside, -25), "AmbientTemperatureCelsius"), "room registered without world scan");
             streamed.SetActive(false);
             Equal(-25, Number(read(inside, -25), "AmbientTemperatureCelsius"), "inactive cached room");
             streamed.SetActive(true);
             Equal(22, Number(read(inside, -25), "AmbientTemperatureCelsius"), "reactivated cached room");
-            Equal(officeDeadline, (float)StaticGet(offices, "nextScan"), "reads do not rescan the world");
+            Equal(officeDeadline, (float)StaticGet(discovery, "nextReconciliation"), "reads do not rescan the world");
 
             var scene = UnityEditor.SceneManagement.EditorSceneManager.NewPreviewScene();
             sceneOffice.transform.position = new Vector3(14000, 0, 14000);
@@ -141,6 +188,7 @@ public static class VerifyStationOffice
             UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(sceneOffice, scene);
             InvokeStatic(assembly.GetType("DVSurvival.Mod.ClimateSceneDiscovery"), "OnSceneLoaded", scene,
                 UnityEngine.SceneManagement.LoadSceneMode.Additive);
+            DrainDiscovery(discovery);
             Equal(22, Number(read(sceneOffice.transform.TransformPoint(new Vector3(3, 0, 0)), -25),
                 "AmbientTemperatureCelsius"), "disabled controller found on sector load");
 
@@ -163,16 +211,19 @@ public static class VerifyStationOffice
             Equal(-25f, Number(read(loco.transform.position + Vector3.right * 8f, -25), "AmbientTemperatureCelsius"), "outside seven metre radius");
             loco.SetActive(false);
             // Reconciliation while pooled must not lose the object for later reuse.
-            fireboxes.GetField("nextScan", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, 0f);
+            discovery.GetField("nextReconciliation", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, 0f);
+            DrainDiscovery(discovery);
             Equal(-25f, Number(read(loco.transform.position, -25), "AmbientTemperatureCelsius"), "pooled firebox gives no heat");
             loco.SetActive(true);
             Equal(5f, Number(read(loco.transform.position, -25), "AmbientTemperatureCelsius"), "pooled firebox reactivation needs no Init");
-            var deadline = (float)StaticGet(fireboxes, "nextScan");
+            var deadline = (float)StaticGet(discovery, "nextReconciliation");
             for (var i = 0; i < 100; i++) read(loco.transform.position, -25);
-            Equal(deadline, (float)StaticGet(fireboxes, "nextScan"), "no repeated firebox scan during sampling");
+            Equal(deadline, (float)StaticGet(discovery, "nextReconciliation"), "no repeated firebox scan during sampling");
             UnityEngine.Object.DestroyImmediate(firebox);
             InvokeStatic(fireboxes, "GetLoaded");
             Equal(before, entries.Count, "destroyed firebox removed");
+            UnityEngine.Object.DestroyImmediate(sceneOffice);
+            UnityEditor.SceneManagement.EditorSceneManager.ClosePreviewScene(scene);
             Debug.Log("CLIMATE_CACHE_OK: new sector, lifecycle registration, deduplication, inactive/reactivated rooms and fireboxes, radius/door heat, destroyed entries, throttled reconciliation");
         }
         finally
@@ -181,6 +232,61 @@ public static class VerifyStationOffice
             UnityEngine.Object.DestroyImmediate(sceneOffice);
             UnityEngine.Object.DestroyImmediate(loco);
             InvokeStatic(offices, "Reset"); InvokeStatic(fireboxes, "Reset");
+        }
+    }
+
+    private static void DrainDiscovery(Type discovery)
+    {
+        for (int i = 0; i < 10000; i++)
+        {
+            InvokeStatic(discovery, "Tick");
+            if (((System.Collections.ICollection)StaticGet(discovery, "pending")).Count == 0) return;
+        }
+        throw new Exception("Incremental scene discovery failed to drain.");
+    }
+
+    private static void VerifyWorldRegistry(Assembly assembly, Assembly game, object sampler)
+    {
+        var registry = assembly.GetType("DVSurvival.Mod.SurvivalWorldRegistry", true);
+        var discovery = assembly.GetType("DVSurvival.Mod.ClimateSceneDiscovery", true);
+        var shopRoot = new GameObject("fixture shop"); shopRoot.SetActive(false);
+        var bedRoot = new GameObject("fixture inactive bed"); bedRoot.SetActive(false);
+        shopRoot.transform.position = new Vector3(18000, 0, 18000);
+        try
+        {
+            var shop = shopRoot.AddComponent(game.GetType("Shop", true));
+            shop.GetType().GetField("itemSpawnTransform").SetValue(shop, shopRoot.transform);
+            var bed = bedRoot.AddComponent(game.GetType("DV.BedSleeping", true));
+            var shopPatch = assembly.GetType("DVSurvival.Mod.RegisterShopClimatePatch", true);
+            var bedPatch = assembly.GetType("DVSurvival.Mod.RegisterBedClimatePatch", true);
+            InvokeStatic(shopPatch, "Postfix", shop); InvokeStatic(shopPatch, "Postfix", shop);
+            InvokeStatic(bedPatch, "Postfix", bed); InvokeStatic(bedPatch, "Postfix", bed);
+            Func<string, System.Collections.IList> entries = name => (System.Collections.IList)
+                registry.GetProperty(name, BindingFlags.Static | BindingFlags.NonPublic).GetValue(null, null);
+            var shops = entries("Shops"); var beds = entries("Beds");
+            if (!shops.Contains(shop) || !beds.Contains(bed)) throw new Exception("Inactive registered objects lost.");
+            int shopCount = shops.Count, bedCount = beds.Count;
+            var near = sampler.GetType().GetMethod("IsNear", BindingFlags.Instance | BindingFlags.NonPublic);
+            if ((bool)near.Invoke(sampler, new object[] { shopRoot.transform.position, 5f, true }))
+                throw new Exception("Inactive shop counted as usable.");
+            shopRoot.SetActive(true);
+            if (!(bool)near.Invoke(sampler, new object[] { shopRoot.transform.position, 5f, true }))
+                throw new Exception("Reactivated shop not usable.");
+            shopRoot.SetActive(false);
+            InvokeStatic(registry, "Reset");
+            InvokeStatic(discovery, "OnSceneLoaded", shopRoot.scene, UnityEngine.SceneManagement.LoadSceneMode.Single);
+            DrainDiscovery(discovery);
+            if (!entries("Shops").Contains(shop) || !entries("Beds").Contains(bed))
+                throw new Exception("Inactive shops/beds not recovered by incremental discovery after reset.");
+            UnityEngine.Object.DestroyImmediate(shopRoot); UnityEngine.Object.DestroyImmediate(bedRoot);
+            if (entries("Shops").Contains(shop) || entries("Beds").Contains(bed))
+                throw new Exception("Destroyed registry entries retained.");
+            Debug.Log("WORLD_REGISTRY_OK: shop/bed lifecycle, inactive retention, active shop validation, reset/incremental rediscovery, destroyed pruning");
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(shopRoot); UnityEngine.Object.DestroyImmediate(bedRoot);
+            InvokeStatic(registry, "Reset");
         }
     }
 

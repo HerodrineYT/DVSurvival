@@ -132,7 +132,7 @@ namespace DVSurvival.Mod
             settings.UseDvSeasonsTemperature = GUILayout.Toggle(settings.UseDvSeasonsTemperature,
                 ModLocalization.Text("Использовать температуру Dynamic Seasons", "Use Dynamic Seasons temperature"));
             GUILayout.Label(ModLocalization.Text("Масштаб HUD: ", "HUD scale: ") +
-                ModLocalization.Number(settings.HudScale, "F2"));
+                ModLocalization.Number(settings.HudScale * 100f, "F0") + "%");
             settings.HudScale = GUILayout.HorizontalSlider(settings.HudScale, 0.65f, 1.75f);
             GUILayout.Label(ModLocalization.Text("Вариант интерфейса (применяется сразу)", "HUD style (applies immediately)"));
             HudStyleNames[0] = ModLocalization.Text("Кольца", "Rings");
@@ -143,9 +143,15 @@ namespace DVSurvival.Mod
             HudStyleNames[5] = ModLocalization.Text("Классический (старый)", "Classic (original)");
             settings.HudStyle = GUILayout.SelectionGrid(settings.HudStyle,
                 HudStyleNames, 3);
-            GUILayout.Label(ModLocalization.Text("Размер новых вариантов (к общему масштабу): ",
-                "New layouts size (multiplies HUD scale): ") + ModLocalization.Number(settings.CompactHudScale, "F2") + "×");
-            settings.CompactHudScale = GUILayout.HorizontalSlider(settings.CompactHudScale, 0.75f, 3f);
+            GUILayout.Label(ModLocalization.Text(
+                "Разблокируйте курсор, удерживайте ЛКМ на блоке HUD 2 секунды и перетащите. Отпустите — положение сохранится; Esc — отмена. При 100% ширина блока потребностей одинакова во всех стилях.",
+                "Unlock the cursor, hold LMB on a HUD block for 2 seconds, then drag. Release to save; Esc to cancel. At 100%, every style has the same needs-block width."));
+            if (GUILayout.Button(ModLocalization.Text("Сбросить расположение текущего HUD", "Reset current HUD positions")))
+            {
+                for (int panel = 0; panel < HudPlacement.PanelCount; panel++)
+                    settings.HudPanelPositions[HudPlacement.Index(settings.HudStyle, panel)].Reset();
+                settings.Save(modEntry);
+            }
             GUILayout.Space(8f);
             GUILayout.Label(ModLocalization.Text(
                 "Следующие параметры задаёт хост и они едины для расчёта всех игроков.",
@@ -162,6 +168,9 @@ namespace DVSurvival.Mod
             GUILayout.Label(ModLocalization.Text("Множитель урона: ", "Damage multiplier: ") +
                 ModLocalization.Number(settings.DamageMultiplier, "F2") + "×");
             settings.DamageMultiplier = GUILayout.HorizontalSlider(settings.DamageMultiplier, 0f, 5f);
+            GUILayout.Label(ModLocalization.Text(
+                "Температурный урон: тело ниже 35 °C или выше 38,5 °C; воздух выше 55 °C. Урон идёт по активному реальному времени, независимо от длительности суток.",
+                "Temperature damage: body below 35 °C or above 38.5 °C; air above 55 °C. Damage follows active real time, independently of day length."));
             GUILayout.Label(ModLocalization.Text("Скорость изменения температуры тела: ",
                 "Body temperature change rate: ") +
                 ModLocalization.Number(settings.TemperatureChangeMultiplier, "F2") + "×");

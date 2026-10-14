@@ -3,7 +3,8 @@
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>DVSurvival.Multiplayer</AssemblyName>
     <RootNamespace>DVSurvival.Multiplayer</RootNamespace>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
+    <DefineConstants>$(DefineConstants);ENABLE_PROFILER</DefineConstants>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <MultiplayerApiDll Condition="'$(MultiplayerApiDll)' == '' and Exists('$(DVSurvivalArtifactsDir)\dependencies\Multiplayer\MultiplayerAPI.dll')">$(DVSurvivalArtifactsDir)\dependencies\Multiplayer\MultiplayerAPI.dll</MultiplayerApiDll>
     <MultiplayerApiDll Condition="'$(MultiplayerApiDll)' == ''">$(DVModsDir)\Multiplayer\MultiplayerAPI.dll</MultiplayerApiDll>

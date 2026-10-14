@@ -15,7 +15,8 @@ namespace DVSurvival.Core
     {
         public const int FullUnits = 1000;
         public static bool Supports(ProvisionKind kind) =>
-            kind == ProvisionKind.Meal || kind == ProvisionKind.Water || kind == ProvisionKind.Coffee;
+            kind == ProvisionKind.Meal || kind == ProvisionKind.Water || kind == ProvisionKind.Coffee ||
+            kind == ProvisionKind.CannedFood || kind == ProvisionKind.Tea;
 
         // Requests contain a cumulative target, not a delta. Replays cannot grant another sip.
         public static SurvivalResultCode Consume(Dictionary<string, PartialProvisionRecord> portions,
@@ -50,6 +51,12 @@ namespace DVSurvival.Core
             switch (kind)
             {
                 case ProvisionKind.Meal: state.Hunger += 45f * fraction; break;
+                case ProvisionKind.CannedFood: state.Hunger += 60f * fraction; break;
+                case ProvisionKind.Tea:
+                    state.Hydration += 35f * fraction;
+                    if (state.BodyTemperatureCelsius < 37f)
+                        state.BodyTemperatureCelsius = Math.Min(37f, state.BodyTemperatureCelsius + .15f * fraction);
+                    break;
                 case ProvisionKind.Water:
                     state.Hydration += 50f * fraction;
                     if (state.BodyTemperatureCelsius > 36f)
@@ -73,8 +80,9 @@ namespace DVSurvival.Core
         }
         private static bool Needed(SurvivalState s, ProvisionKind kind)
         {
-            if (kind == ProvisionKind.Meal) return s.Hunger < 100f;
+            if (kind == ProvisionKind.Meal || kind == ProvisionKind.CannedFood) return s.Hunger < 100f;
             if (kind == ProvisionKind.Water) return s.Hydration < 100f || s.BodyTemperatureCelsius > 36f;
+            if (kind == ProvisionKind.Tea) return s.Hydration < 100f || s.BodyTemperatureCelsius < 37f;
             return s.Rest < 100f || s.Hydration < 100f || s.BodyTemperatureCelsius < 37f;
         }
     }

@@ -10,7 +10,7 @@ namespace DVSurvival.Mod
 {
     internal static class ProvisionInventoryArtwork
     {
-        private static readonly Sprite[,,] sprites = new Sprite[2, 2, 6];
+        private static readonly Sprite[,,] sprites = new Sprite[2, 2, (int)ProvisionKind.Tea + 1];
 
         public static void Load(List<Object> assets)
         {
@@ -20,22 +20,21 @@ namespace DVSurvival.Mod
                 var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = resource };
                 assets.Add(texture);
                 using (var input = typeof(ProvisionInventoryArtwork).Assembly.GetManifestResourceStream(resource))
-                using (var buffer = new MemoryStream())
-                {
+                    {
                     if (input == null) throw new InvalidOperationException("Missing inventory model atlas: " + resource);
-                    input.CopyTo(buffer);
-                    if (!ImageConversion.LoadImage(texture, buffer.ToArray(), true))
+                    if (!ImageConversion.LoadImage(texture, EmbeddedBytes.Read(input), true))
                         throw new InvalidOperationException("Invalid inventory model atlas: " + resource);
                 }
                 texture.wrapMode = TextureWrapMode.Clamp;
                 texture.filterMode = FilterMode.Bilinear;
                 for (int ghost = 0; ghost < 2; ghost++)
-                    for (int kind = 1; kind <= 5; kind++)
+                    for (int index = 0; index < ProvisionCatalog.Count; index++)
                     {
-                        var sprite = Sprite.Create(texture, new Rect((kind - 1) * 256, ghost == 0 ? 256 : 0, 256, 256),
+                        var kind = ProvisionCatalog.At(index);
+                        var sprite = Sprite.Create(texture, new Rect(index * 256, ghost == 0 ? 256 : 0, 256, 256),
                             new Vector2(.5f, .5f), 256f, 0, SpriteMeshType.FullRect);
                         assets.Add(sprite);
-                        sprites[language, ghost, kind] = sprite;
+                        sprites[language, ghost, (int)kind] = sprite;
                     }
             }
         }
@@ -43,7 +42,7 @@ namespace DVSurvival.Mod
         public static Sprite Get(ProvisionKind kind, bool ghost)
         {
             int index = (int)kind;
-            return index < 1 || index > 5 ? null : sprites[ModLocalization.IsRussian ? 0 : 1, ghost ? 1 : 0, index];
+            return !ProvisionCatalog.IsSupported(kind) ? null : sprites[ModLocalization.IsRussian ? 0 : 1, ghost ? 1 : 0, index];
         }
         public static void Clear() { Array.Clear(sprites, 0, sprites.Length); }
 
@@ -57,7 +56,7 @@ namespace DVSurvival.Mod
     }
 
     // Native inventory/hotbar/container UI uses these getters, including restored/legacy instances.
-    // Only our five items are changed; no UI replacement or scene searches.
+    // Only our items are changed; no UI replacement or scene searches.
     [HarmonyPatch(typeof(InventoryItemSpec), nameof(InventoryItemSpec.ItemIconSprite), MethodType.Getter)]
     internal static class ProvisionInventoryModelPatch
     {

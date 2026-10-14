@@ -24,6 +24,12 @@ namespace DVSurvival.Multiplayer
         private uint connectionGeneration;
         private string multiplayerVersion = string.Empty;
         private float nextPlayerStateWarning;
+        private readonly ReusablePlayerSnapshots playerSnapshots = new ReusablePlayerSnapshots();
+        private int playerSnapshotFrame = -1;
+        private readonly StateConfigurationCache[] sentConfigurations = new StateConfigurationCache[256];
+        private readonly SessionConfigurationReceiver receivedConfiguration = new SessionConfigurationReceiver();
+        private readonly float[] nextConfigurationRefresh = new float[256];
+        private readonly EnvironmentDeliveryPolicy environmentDelivery = new EnvironmentDeliveryPolicy();
 
         public bool IsAvailable { get { return MultiplayerAPI.IsMultiplayerLoaded; } }
         public bool IsSupported
@@ -103,40 +109,40 @@ namespace DVSurvival.Multiplayer
 
         public IReadOnlyList<SurvivalPlayerInfo> GetPlayers()
         {
-            var result = new List<SurvivalPlayerInfo>();
-            IEnumerable<IPlayer> source = null;
-            if (IsAuthority && server != null) source = server.Players;
-            else if (client != null) source = client.Players;
-            if (source != null)
+            UnityEngine.Profiling.Profiler.BeginSample("DVSurvival.MP.GetPlayers");
+            try
             {
+            // A stable view for the entire frame also makes nested lookups during broadcasts safe.
+            if (playerSnapshotFrame == Time.frameCount) return playerSnapshots.View;
+            playerSnapshotFrame = Time.frameCount;
+            playerSnapshots.Begin();
+            IEnumerable<IPlayer> source = IsAuthority && server != null ? server.Players : client?.Players;
+            if (source != null)
                 foreach (var player in source)
                 {
-                    var converted = ConvertPlayer(player);
-                    if (converted != null) result.Add(converted);
+                    if (player == null) continue;
+                    var converted = ConvertPlayer(player, playerSnapshots.Get(player.PlayerId));
+                    if (converted != null) playerSnapshots.Add(player.PlayerId);
                 }
-            }
-            if (client != null && result.All(p => p.PlayerId != client.PlayerId))
+            if (client != null && !playerSnapshots.Contains(client.PlayerId))
             {
-                var position = PlayerManager.PlayerTransform == null
-                    ? Vector3.zero
-                    : PlayerManager.PlayerTransform.position;
+                var position = PlayerManager.PlayerTransform == null ? Vector3.zero : PlayerManager.PlayerTransform.position;
                 var car = PlayerManager.Car;
-                result.Add(new SurvivalPlayerInfo
-                {
-                    PlayerId = client.PlayerId,
-                    DisplayName = "Local player",
-                    PositionX = position.x,
-                    PositionY = position.y,
-                    PositionZ = position.z,
-                    IsHost = IsAuthority,
-                    IsLoaded = PlayerManager.PlayerTransform != null,
-                    IsOnCar = car != null,
-                    OccupiedCarIsLocomotive = car != null && car.IsLoco,
-                    OccupiedCarId = GetCarId(car),
-                    OccupiedCarSupportsCabHeater = SupportsCabHeater(car),
-                });
+                var local = playerSnapshots.Get(client.PlayerId);
+                local.PlayerId = client.PlayerId;
+                local.DisplayName = "Local player";
+                local.PositionX = position.x; local.PositionY = position.y; local.PositionZ = position.z;
+                local.IsHost = IsAuthority;
+                local.IsLoaded = PlayerManager.PlayerTransform != null;
+                local.IsOnCar = car != null;
+                local.OccupiedCarIsLocomotive = car != null && car.IsLoco;
+                local.OccupiedCarId = GetCarId(car);
+                local.OccupiedCarSupportsCabHeater = SupportsCabHeater(car);
+                playerSnapshots.Add(local.PlayerId);
             }
-            return result.AsReadOnly();
+            return playerSnapshots.View;
+            }
+            finally { UnityEngine.Profiling.Profiler.EndSample(); }
         }
 
         public void SendHello(SurvivalHello hello)
@@ -157,8 +163,9 @@ namespace DVSurvival.Multiplayer
         {
             if (!enabled || disposed || client == null || !IsSessionActive || IsAuthority || report == null)
                 return;
-            // Travel transitions must reach the host before a later time-skip/action packet.
-            client.SendSerializablePacketToServer(new SurvivalEnvironmentPacket { Report = report }, true);
+            // MPAPI uses ReliableUnordered, not ReliableOrdered. TravelRevision guards reordered transitions.
+            var reliable = environmentDelivery.Prepare(report, Time.realtimeSinceStartup);
+            client.SendSerializablePacketToServer(new SurvivalEnvironmentPacket { Report = report }, reliable);
         }
 
         public void SendStateToPlayer(byte playerId, SurvivalStateMessage message, bool reliable)
@@ -166,6 +173,11 @@ namespace DVSurvival.Multiplayer
             if (!enabled || disposed || server == null || !IsAuthority || message == null) return;
             var player = server.GetPlayer(playerId);
             if (player == null) return;
+            var config = sentConfigurations[playerId] ?? (sentConfigurations[playerId] = new StateConfigurationCache());
+            // Occasional reliable keyframes recover lost cache/first-connect telemetry, without repeating config every 2 s.
+            if (Time.realtimeSinceStartup >= nextConfigurationRefresh[playerId]) reliable = true;
+            reliable = config.Prepare(message, reliable);
+            if (reliable) nextConfigurationRefresh[playerId] = Time.realtimeSinceStartup + 10f;
             server.SendSerializablePacketToPlayer(new SurvivalStatePacket { Message = message }, player, reliable);
         }
 
@@ -197,6 +209,10 @@ namespace DVSurvival.Multiplayer
 
         private void OnServerStopped()
         {
+            playerSnapshotFrame = -1;
+            playerSnapshots.Reset();
+            Array.Clear(sentConfigurations, 0, sentConfigurations.Length);
+            Array.Clear(nextConfigurationRefresh, 0, nextConfigurationRefresh.Length);
             DetachServer();
             server = null;
             serverRegistered = false;
@@ -220,6 +236,7 @@ namespace DVSurvival.Multiplayer
         private void RegisterServer(IServer value)
         {
             if (serverRegistered || value == null) return;
+            playerSnapshotFrame = -1;
             server = value;
             server.RegisterSerializablePacket<SurvivalHelloPacket>(OnHelloPacket);
             server.RegisterSerializablePacket<SurvivalActionPacket>(OnActionPacket);
@@ -243,6 +260,11 @@ namespace DVSurvival.Multiplayer
 
         private void AdvanceConnectionGeneration()
         {
+            playerSnapshots.Reset();
+            receivedConfiguration.Reset(); environmentDelivery.Reset();
+            Array.Clear(sentConfigurations, 0, sentConfigurations.Length);
+            Array.Clear(nextConfigurationRefresh, 0, nextConfigurationRefresh.Length);
+            playerSnapshotFrame = -1;
             unchecked
             {
                 connectionGeneration++;
@@ -272,6 +294,7 @@ namespace DVSurvival.Multiplayer
         private void OnStatePacket(SurvivalStatePacket packet)
         {
             if (!enabled || packet == null || packet.Message == null) return;
+            if (packet.Message.Protocol == SurvivalConstants.ProtocolVersion && !receivedConfiguration.Apply(packet.Message)) return;
             var handler = StateReceived;
             if (handler != null) handler(packet.Message);
         }
@@ -285,7 +308,9 @@ namespace DVSurvival.Multiplayer
 
         private void OnServerPlayerDisconnected(IPlayer player)
         {
+            playerSnapshotFrame = -1;
             if (!enabled || player == null) return;
+            sentConfigurations[player.PlayerId] = null;
             var handler = PlayerDisconnected;
             if (handler != null) handler(player.PlayerId);
         }
@@ -304,27 +329,23 @@ namespace DVSurvival.Multiplayer
                 SurvivalConstants.MinimumMultiplayerVersion) >= 0;
         }
 
-        private SurvivalPlayerInfo ConvertPlayer(IPlayer player)
+        private SurvivalPlayerInfo ConvertPlayer(IPlayer player, SurvivalPlayerInfo target = null)
         {
             if (player == null) return null;
             try
             {
                 var position = player.Position;
                 var car = player.OccupiedCar;
-                return new SurvivalPlayerInfo
-                {
-                    PlayerId = player.PlayerId,
-                    DisplayName = player.DisplayName ?? player.Username ?? string.Empty,
-                    PositionX = position.x,
-                    PositionY = position.y,
-                    PositionZ = position.z,
-                    IsHost = player.IsHost,
-                    IsLoaded = player.IsLoaded,
-                    IsOnCar = player.IsOnCar,
-                    OccupiedCarIsLocomotive = car != null && car.IsLoco,
-                    OccupiedCarId = GetCarId(car),
-                    OccupiedCarSupportsCabHeater = SupportsCabHeater(car),
-                };
+                // Event callbacks own a fresh record; deferred hello handling must not observe mutations.
+                var result = target ?? new SurvivalPlayerInfo();
+                result.PlayerId = player.PlayerId;
+                result.DisplayName = player.DisplayName ?? player.Username ?? string.Empty;
+                result.PositionX = position.x; result.PositionY = position.y; result.PositionZ = position.z;
+                result.IsHost = player.IsHost; result.IsLoaded = player.IsLoaded; result.IsOnCar = player.IsOnCar;
+                result.OccupiedCarIsLocomotive = car != null && car.IsLoco;
+                result.OccupiedCarId = GetCarId(car);
+                result.OccupiedCarSupportsCabHeater = SupportsCabHeater(car);
+                return result;
             }
             catch (Exception exception)
             {

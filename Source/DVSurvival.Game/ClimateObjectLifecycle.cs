@@ -18,6 +18,26 @@ namespace DVSurvival.Mod
         }
     }
 
+    [HarmonyPatch(typeof(Shop), "Awake")]
+    internal static class RegisterShopClimatePatch
+    {
+        private static void Postfix(Shop __instance)
+        {
+            try { SurvivalWorldRegistry.Register(__instance); }
+            catch (Exception error) { ClimateRegistrationErrors.Report(error); }
+        }
+    }
+
+    [HarmonyPatch(typeof(BedSleeping), "Start")]
+    internal static class RegisterBedClimatePatch
+    {
+        private static void Postfix(BedSleeping __instance)
+        {
+            try { SurvivalWorldRegistry.Register(__instance); }
+            catch (Exception error) { ClimateRegistrationErrors.Report(error); }
+        }
+    }
+
     [HarmonyPatch(typeof(PostProcessingVolumeAOController), "OnEnable")]
     internal static class RegisterOfficeClimatePatch
     {

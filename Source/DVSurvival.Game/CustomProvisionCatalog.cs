@@ -12,7 +12,7 @@ using Object = UnityEngine.Object;
 namespace DVSurvival.Mod
 {
     // CIM owns registration, resource loading, shop layout and inventory specs.
-    // Our adapter owns only its five prefabs; no per-frame discovery or asset generation.
+    // Our adapter owns its prefabs; no per-frame discovery or asset generation.
     internal static class CustomProvisionCatalog
     {
         private const string Prefix = "DVSurvival_";
@@ -54,9 +54,9 @@ namespace DVSurvival.Mod
             Clear();
             ProvisionInventoryArtwork.Load(assets);
             var material = ProvisionModels.CreateMaterial(assets);
-            for (int i = 1; i <= 5; i++)
+            for (int i = 0; i < ProvisionCatalog.Count; i++)
             {
-                var kind = (ProvisionKind)i;
+                var kind = ProvisionCatalog.At(i);
                 var model = ProvisionModels.Create(kind, material, assets);
                 var modelBounds = model.GetComponent<MeshFilter>().sharedMesh.bounds;
                 var placement = new ShelfDisplayLayout(modelBounds.min.x, modelBounds.min.y, modelBounds.min.z,

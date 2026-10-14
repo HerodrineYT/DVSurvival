@@ -3,7 +3,8 @@
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>DVSurvival</AssemblyName>
     <RootNamespace>DVSurvival.Mod</RootNamespace>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
+    <DefineConstants>$(DefineConstants);ENABLE_PROFILER</DefineConstants>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
   <ItemGroup>
@@ -25,6 +26,7 @@
     <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(DVManagedDir)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(DVManagedDir)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(DVManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(DVManagedDir)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(DVManagedDir)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(DVManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="DV.Utils"><HintPath>$(DVManagedDir)\DV.Utils.dll</HintPath><Private>false</Private></Reference>

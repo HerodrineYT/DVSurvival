@@ -7,7 +7,10 @@ namespace DVSurvival.Core
         Water = 2,
         Coffee = 3,
         FirstAid = 4,
-        HeatPack = 5
+        HeatPack = 5,
+        // 6 was the removed alcoholic item; never reuse it in saved records or network commands.
+        CannedFood = 7,
+        Tea = 8
     }
 
     public enum SurvivalActionKind : byte

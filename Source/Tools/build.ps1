@@ -66,7 +66,6 @@ if (-not $SkipTests) {
 $output = Join-Path $projectRoot 'artifacts\build\DVSurvival'
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'dependencies.lock.json') -Destination $output -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot 'CHANGELOG.md') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $output -Force
 New-Item -ItemType Directory -Path (Join-Path $output 'Docs') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\USER_GUIDE_RU.md') -Destination (Join-Path $output 'Docs') -Force
@@ -74,7 +73,12 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\MULTIPLAYER_ARCHITECTURE_RU
 Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\CUSTOM_ITEM_MOD_INTEGRATION_RU.md') -Destination (Join-Path $output 'Docs') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\RELEASE_0.1.1_RU.md') -Destination (Join-Path $output 'Docs') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\RELEASE_0.1.2_RU.md') -Destination (Join-Path $output 'Docs') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\RELEASE_0.1.3_RU.md') -Destination (Join-Path $output 'Docs') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\RELEASE_0.2.0_RU.md') -Destination (Join-Path $output 'Docs') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\RELEASE_0.2.1_RU.md') -Destination (Join-Path $output 'Docs') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\REBUILD_0.2.0_RU.md') -Destination (Join-Path $output 'Docs') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\PERFORMANCE_0.1.1_RU.md') -Destination (Join-Path $output 'Docs') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'Docs\PERFORMANCE_0.1.2_RU.md') -Destination (Join-Path $output 'Docs') -Force
 
 & (Join-Path $PSScriptRoot 'verify_project.ps1') -RequireBuildOutput -DVInstallDir $game
 if ($LASTEXITCODE -ne 0) { throw 'Project verification failed.' }

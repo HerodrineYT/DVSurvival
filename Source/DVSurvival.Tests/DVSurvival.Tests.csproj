@@ -20,6 +20,7 @@
     <Compile Include="..\DVSurvival.Game\SurvivalHud.Layouts.cs" Link="Visuals\SurvivalHud.Layouts.cs" />
     <Compile Include="..\DVSurvival.Game\SurvivalHud.Overlays.cs" Link="Visuals\SurvivalHud.Overlays.cs" />
     <Compile Include="..\DVSurvival.Game\CabinDiagnosticStatus.cs" Link="Diagnostics\CabinDiagnosticStatus.cs" />
+    <Compile Include="..\DVSurvival.Game\NeedsPresenter.cs" Link="Visuals\NeedsPresenter.cs" />
     <Compile Include="..\DVSurvival.Game\NativeLocoHudVisibility.cs" Link="Visuals\NativeLocoHudVisibility.cs" />
   </ItemGroup>
 </Project>

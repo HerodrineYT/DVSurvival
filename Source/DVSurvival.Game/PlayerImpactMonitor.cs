@@ -7,7 +7,6 @@ namespace DVSurvival.Mod
     {
         private const float TrainDamageThresholdKmh = 7f;
         private const float TrainHitCooldownSeconds = 1.5f;
-        private const float TrainContactProbeIntervalSeconds = 0.125f;
         private readonly Collider[] trainContactProbe = new Collider[24];
         private SurvivalRuntime runtime;
         private CustomFirstPersonController firstPerson;
@@ -18,6 +17,8 @@ namespace DVSurvival.Mod
         private float airborneSince;
         private float nextTrainHit;
         private float nextTrainContactProbe;
+        private float nextRiskProbe;
+        private readonly TrainProbeCadence probeCadence = new TrainProbeCadence();
         private Vector3 previousPosition;
         private int trainColliderMask;
         private TrainCar previousCar;
@@ -50,6 +51,8 @@ namespace DVSurvival.Mod
             lastCarSpeed = previousCar == null ? 0f : previousCar.GetAbsSpeed() * 3.6f;
             dismountSpeed = 0f;
             suppressUntil = Time.realtimeSinceStartup + 1f;
+            nextRiskProbe = nextTrainContactProbe = 0f;
+            probeCadence.ObserveRisk(Time.realtimeSinceStartup);
         }
 
         private void Update()
@@ -76,6 +79,7 @@ namespace DVSurvival.Mod
             {
                 dismountSpeed = Time.realtimeSinceStartup >= suppressUntil ? lastCarSpeed : 0f;
                 dismountedAt = Time.realtimeSinceStartup;
+                probeCadence.ObserveRisk(dismountedAt);
                 previousCar = null;
             }
             bool dismountHit = false;
@@ -122,8 +126,18 @@ namespace DVSurvival.Mod
             previousPosition = position;
             if (PlayerManager.Car == null && Time.realtimeSinceStartup >= nextTrainContactProbe)
             {
-                nextTrainContactProbe = Time.realtimeSinceStartup + TrainContactProbeIntervalSeconds;
-                ProbeTrainContact();
+                var now = Time.realtimeSinceStartup;
+                // A broad train-layer-only look-ahead wakes the exact probe BEFORE contact.
+                // Callbacks alone cannot do this for all CharacterController/train combinations.
+                if (now >= nextRiskProbe)
+                {
+                    nextRiskProbe = now + .5f;
+                    using (new SurvivalProfiler("DVSurvival.Impact.RiskProbe"))
+                        if (Physics.CheckSphere(transform.position, 40f, trainColliderMask,
+                            QueryTriggerInteraction.Collide)) probeCadence.ObserveRisk(now);
+                }
+                nextTrainContactProbe = now + probeCadence.Interval(now);
+                if (probeCadence.IsHighRisk(now)) ProbeTrainContact();
             }
         }
 
@@ -144,6 +158,8 @@ namespace DVSurvival.Mod
 
         private void ProbeTrainContact()
         {
+            using (new SurvivalProfiler("DVSurvival.Impact.TrainProbe"))
+            {
             if (capsule == null || Time.realtimeSinceStartup < nextTrainHit) return;
             var center = transform.TransformPoint(capsule.center);
             // CharacterController keeps a small separation from solid train colliders. The
@@ -159,6 +175,7 @@ namespace DVSurvival.Mod
                 trainContactProbe[index] = null;
                 if (TryReportTrainCollision(collider)) break;
             }
+            }
         }
 
         private bool TryReportTrainCollision(Collider collider)
@@ -169,6 +186,7 @@ namespace DVSurvival.Mod
                 return false;
             var car = collider.GetComponentInParent<TrainCar>();
             if (car == null || car == PlayerManager.Car) return false;
+            probeCadence.ObserveRisk(Time.realtimeSinceStartup);
             var speedKmh = car.GetAbsSpeed() * 3.6f;
             if (speedKmh <= TrainDamageThresholdKmh) return false;
             nextTrainHit = Time.realtimeSinceStartup + TrainHitCooldownSeconds;

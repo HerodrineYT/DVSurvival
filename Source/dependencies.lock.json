@@ -1,5 +1,5 @@
 {
-  "checkedAtUtc": "2026-09-13T17:08:54.007Z",
+  "checkedAtUtc": "2026-10-14T00:00:00Z",
   "derailValley": {
     "build": 99,
     "destination": "steam"
@@ -38,10 +38,10 @@
   },
   "dvSeasons": {
     "integration": "optional-reflection",
-    "testedWorkspaceVersion": "0.3.33",
-    "availableWorkspaceSourceVersion": "0.3.33",
-    "mainAssemblySha256": "142bc9acac8647c5ca4d4d3c1e86d7f28d58d0cac7962c4c01126d9c699481c6",
-    "coreAssemblySha256": "424ffa3b4743a77644001ebe2b12f4008fbc79c9d3c880c4559498b9898a7203",
+    "testedWorkspaceVersion": "0.4.0",
+    "availableWorkspaceSourceVersion": "0.4.0",
+    "mainAssemblySha256": "528bbd29d387cf0bfb1480f07abf4bb6d1d5b60116cad73515e7cef6a7641c7c",
+    "coreAssemblySha256": "a38efd780286b31368b7f17f147ea233f9ebd00277243160e02e5b0f786e22ad",
     "hardDependency": false
   }
 }

@@ -59,6 +59,7 @@ namespace DVSurvival.Core
         public uint Sequence;
         public string SessionId = string.Empty;
         public bool IsTravelling;
+        public uint TravelRevision;
         public SurvivalEnvironment Environment = new SurvivalEnvironment();
     }
 
@@ -72,12 +73,16 @@ namespace DVSurvival.Core
         public string SessionId = string.Empty;
         public string StatusKey = string.Empty;
         public SurvivalState State = new SurvivalState();
+        public uint ConfigurationRevision = 1;
+        public bool HasConfiguration = true;
         public bool DisableNeedsConsumption;
         public int MealPrice;
         public int WaterPrice;
         public int CoffeePrice;
         public int FirstAidPrice;
         public int HeatPackPrice;
+        public int CannedFoodPrice;
+        public int TeaPrice;
         public string CabHeaterCarId = string.Empty;
         public float CabHeaterLevel;
         public string ItemIdentity = string.Empty;
@@ -92,6 +97,8 @@ namespace DVSurvival.Core
                 case ProvisionKind.Coffee: return CoffeePrice;
                 case ProvisionKind.FirstAid: return FirstAidPrice;
                 case ProvisionKind.HeatPack: return HeatPackPrice;
+                case ProvisionKind.CannedFood: return CannedFoodPrice;
+                case ProvisionKind.Tea: return TeaPrice;
                 default: return -1;
             }
         }

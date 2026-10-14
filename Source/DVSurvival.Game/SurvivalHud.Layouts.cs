@@ -17,21 +17,24 @@ namespace DVSurvival.Mod
             new Color(.26f, .67f, .82f), new Color(.55f, .47f, .81f) };
         private string compactBodyText = string.Empty;
 
-        private void DrawLayout(float scale)
+        private void DrawHudPanel(int panel, int style)
         {
-            var style = HudLayout.Validate(settings.HudStyle);
-            if (style == HudLayout.Legacy) { DrawLegacy(scale); return; }
-            var width = HudLayout.Width(style);
-            const float x = 20;
-            var y = Screen.height / scale - HudLayout.Height(style) - 20;
-            DrawStyledPanel(new Rect(x, y, width, HudLayout.Height(style)));
+            if (panel == HudPlacement.Air)
+            {
+                DrawStyledPanel(new Rect(0, 0, 338, 36));
+                GUI.Label(new Rect(14, 5, 310, 25), ambientText, UsesBrassFrame ? hudTextStyle : modernSmall);
+                return;
+            }
+            if (panel == HudPlacement.Body) { DrawBodyPanel(style); return; }
+            if (style == HudLayout.Legacy) { DrawLegacyNeeds(0, 0); return; }
+            DrawStyledPanel(new Rect(0, 0, HudLayout.Width(style), HudLayout.Height(style)));
             switch (style)
             {
-                case 1: DrawHorizontalBars(x, y); break;
-                case 2: DrawRibbon(x, y); break;
-                case 3: DrawMinimal(x, y); break;
-                case 4: DrawCompactBrass(x, y); break;
-                default: DrawModernRings(x, y); break;
+                case 1: DrawHorizontalBars(0, 0); break;
+                case 2: DrawRibbon(0, 0); break;
+                case 3: DrawMinimal(0, 0); break;
+                case 4: DrawCompactBrass(0, 0); break;
+                default: DrawModernRings(0, 0); break;
             }
         }
 
@@ -63,17 +66,28 @@ namespace DVSurvival.Mod
             DrawSolid(new Rect(rect.x, rect.y, rect.width * Mathf.Clamp01(fraction), rect.height), color);
         }
 
-        private void Thermal(float x, float y, float width, bool brass = false)
+        private void DrawBodyPanel(int style)
         {
-            var text = brass ? hudTextStyle : modernSmall;
+            DrawStyledPanel(new Rect(0, 0, 312, 62));
+            if (style == HudLayout.Legacy)
+            {
+                artwork.DrawIcon(new Rect(12, 11, 34, 34), 4, Brass);
+                GUI.Label(new Rect(58, 4, 236, 20), legacyBodyText, legacyTitleStyle);
+                var legacyTrack = new Rect(58, 42, 236, 6);
+                artwork.DrawThermal(legacyTrack);
+                artwork.DrawIcon(new Rect(legacyTrack.x + legacyTrack.width * temperatureFraction - 9,
+                    legacyTrack.y - 7, 18, 20), 7, Color.white);
+                return;
+            }
             var color = cachedBodyTemperature >= 38.5f ? NeedColors[0] :
                 (cachedBodyTemperature < 35f ? NeedColors[2] : new Color(0.4f, 0.9f, 0.8f));
-            artwork.DrawIcon(new Rect(x, y + 1, 17, 22), 4, color);
-            GUI.Label(new Rect(x + 29, y, width - 29, 18), compactBodyText, text);
-            GUI.Label(new Rect(x + 29, y + 22, width - 29, 18), ambientText, text);
-            var track = new Rect(x + 29, y + 54, width - 32, 4);
+            var inset = style == 0 || style == 3 ? 12f : 41f;
+            if (inset > 12) artwork.DrawIcon(new Rect(12, 7, 17, 22), 4, color);
+            GUI.Label(new Rect(inset, 6, 300 - inset, 18), compactBodyText,
+                UsesBrassFrame ? hudTextStyle : modernSmall);
+            var track = new Rect(inset, 42, 300 - inset, 4);
             artwork.DrawThermal(track);
-            DrawSolid(new Rect(track.x + track.width * temperatureFraction - 1, y + 50, 2, 12), Color.white);
+            DrawSolid(new Rect(track.x + track.width * temperatureFraction - 1, 38, 2, 12), Color.white);
         }
 
         private void DrawModernRings(float x, float y)
@@ -87,10 +101,6 @@ namespace DVSurvival.Mod
                 GUI.Label(new Rect(dx + 11, y + 62, 40, 16), needValues[i], modernNumber);
                 GUI.Label(new Rect(dx - 2, y + 102, 66, 16), needNames[i], modernCenter);
             }
-            GUI.Label(new Rect(x + 12, y + 126, 126, 18), compactBodyText, modernSmall);
-            GUI.Label(new Rect(x + 142, y + 126, 130, 18), ambientText, modernSmall);
-            artwork.DrawThermal(new Rect(x + 12, y + 160, 256, 4));
-            DrawSolid(new Rect(x + 12 + 256 * temperatureFraction - 1, y + 156, 2, 12), Color.white);
         }
 
         private void DrawHorizontalBars(float x, float y)
@@ -103,7 +113,6 @@ namespace DVSurvival.Mod
                 Progress(new Rect(x + 123, dy + 7, 104, 9), needFractions[i], NeedColors[i]);
                 GUI.Label(new Rect(x + 239, dy, 45, 22), needValues[i], modernNumber);
             }
-            Thermal(x + 12, y + 120, 268);
         }
 
         private void DrawRibbon(float x, float y)
@@ -116,7 +125,6 @@ namespace DVSurvival.Mod
                 Progress(new Rect(dx, y + 40, 65, 4), needFractions[i], NeedColors[i]);
                 GUI.Label(new Rect(dx, y + 48, 70, 16), needNames[i], modernSmall);
             }
-            Thermal(x + 324, y + 8, 184);
         }
 
         private void DrawMinimal(float x, float y)
@@ -128,37 +136,19 @@ namespace DVSurvival.Mod
                 GUI.Label(new Rect(dx, y + 36, 50, 18), needValues[i], modernCenter);
                 Progress(new Rect(dx, y + 64, 50, 3), needFractions[i], NeedColors[i]);
             }
-            GUI.Label(new Rect(x + 10, y + 78, 125, 18), compactBodyText, modernLeft);
-            GUI.Label(new Rect(x + 10, y + 102, 228, 18), ambientText, modernSmall);
-            // Short body-temperature scale sits beside its exact value.
-            artwork.DrawThermal(new Rect(x + 147, y + 85, 90, 4));
-            DrawSolid(new Rect(x + 147 + 90 * temperatureFraction - 1, y + 82, 2, 10), Color.white);
         }
 
-        private void DrawLegacy(float scale)
+        private void DrawLegacyNeeds(float x, float y)
         {
-            var width = Screen.width / scale;
-            var bottom = Screen.height / scale - 32;
-            const float x = 28;
             for (var i = 0; i < 4; i++)
             {
                 var dx = x + i * 86;
-                DrawPlate(new Rect(dx, bottom - 172, 80, 134));
-                artwork.DrawDial(new Rect(dx, bottom - 172, 80, 80), needFractions[i], LegacyColors[i]);
-                artwork.DrawIcon(new Rect(dx + 24, bottom - 150, 32, 32), i, LegacyColors[i]);
-                GUI.Label(new Rect(dx + 4, bottom - 92, 72, 18), needValues[i], labelStyle);
-                GUI.Label(new Rect(dx + 2, bottom - 78, 76, 19), needNames[i], labelStyle);
+                DrawPlate(new Rect(dx, y, 80, 134));
+                artwork.DrawDial(new Rect(dx, y, 80, 80), needFractions[i], LegacyColors[i]);
+                artwork.DrawIcon(new Rect(dx + 24, y + 22, 32, 32), i, LegacyColors[i]);
+                GUI.Label(new Rect(dx + 4, y + 80, 72, 18), needValues[i], labelStyle);
+                GUI.Label(new Rect(dx + 2, y + 94, 76, 19), needNames[i], labelStyle);
             }
-            DrawPlate(new Rect(x, bottom - 36, 338, 36));
-            GUI.Label(new Rect(x + 14, bottom - 31, 310, 25), ambientText, hudTextStyle);
-            var tx = (width - 312) * 0.5f;
-            DrawPlate(new Rect(tx, bottom - 62, 312, 62));
-            artwork.DrawIcon(new Rect(tx + 12, bottom - 51, 34, 34), 4, Brass);
-            GUI.Label(new Rect(tx + 58, bottom - 58, 236, 20), legacyBodyText, legacyTitleStyle);
-            var track = new Rect(tx + 58, bottom - 20, 236, 6);
-            artwork.DrawThermal(track);
-            artwork.DrawIcon(new Rect(track.x + track.width * temperatureFraction - 9,
-                track.y - 7, 18, 20), 7, Color.white);
         }
 
         private void DrawCompactBrass(float x, float y)
@@ -171,13 +161,6 @@ namespace DVSurvival.Mod
                 GUI.Label(new Rect(dx + 11, y + 67, 40, 16), needValues[i], labelStyle);
                 GUI.Label(new Rect(dx - 2, y + 105, 66, 17), needNames[i], labelStyle);
             }
-            var color = cachedBodyTemperature >= 38.5f ? NeedColors[0] :
-                (cachedBodyTemperature < 35f ? NeedColors[2] : new Color(0.4f, 0.9f, 0.8f));
-            artwork.DrawIcon(new Rect(x + 12, y + 133, 17, 22), 4, color);
-            GUI.Label(new Rect(x + 41, y + 132, 105, 18), compactBodyText, hudTextStyle);
-            GUI.Label(new Rect(x + 151, y + 132, 119, 18), ambientText, hudTextStyle);
-            artwork.DrawThermal(new Rect(x + 41, y + 164, 229, 4));
-            DrawSolid(new Rect(x + 41 + 229 * temperatureFraction - 1, y + 160, 2, 12), Color.white);
         }
     }
 }

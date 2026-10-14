@@ -15,10 +15,10 @@ foreach ($folder in @('DVSurvival.Core','DVSurvival.Game','DVSurvival.Multiplaye
     $sourceFiles += Get-ChildItem -LiteralPath (Join-Path $projectRoot $folder) -Recurse -File | Where-Object {
         $relative = $_.FullName.Substring($projectRoot.Length + 1)
         $relative -notmatch '(^|[\\/])(bin|obj|artifacts|node_modules|\.git|\.vs|TestResults)([\\/]|$)' -and
-        $_.Extension -in @('.cs','.csproj','.py','.ps1','.cjs','.png','.csv','.json','.md')
+        $_.Extension -in @('.cs','.csproj','.py','.ps1','.cjs','.png','.csv','.json','.md','.txt')
     }
 }
-foreach ($name in @('DVSurvival.sln','Directory.Build.props','global.json','dependencies.lock.json','README.md','CHANGELOG.md','LICENSE','.gitignore')) {
+foreach ($name in @('DVSurvival.sln','Directory.Build.props','global.json','dependencies.lock.json','README.md','LICENSE','.gitignore')) {
     $sourceFiles += Get-Item -LiteralPath (Join-Path $projectRoot $name)
 }
 function Add-ReleaseEntry($Zip, $File, [string]$EntryName) {

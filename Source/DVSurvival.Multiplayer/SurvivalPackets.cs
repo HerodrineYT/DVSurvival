@@ -116,6 +116,7 @@ namespace DVSurvival.Multiplayer
             writer.Write(report.SessionId != null && report.SessionId.Length <= 80
                 ? report.SessionId : string.Empty);
             writer.Write(report.IsTravelling);
+            writer.Write(report.TravelRevision);
         }
 
         public void Deserialize(BinaryReader reader)
@@ -145,6 +146,7 @@ namespace DVSurvival.Multiplayer
             var sessionId = reader.ReadString();
             Report.SessionId = sessionId.Length <= 80 ? sessionId : string.Empty;
             Report.IsTravelling = reader.ReadBoolean();
+            Report.TravelRevision = reader.ReadUInt32();
         }
     }
 
@@ -161,17 +163,20 @@ namespace DVSurvival.Multiplayer
             writer.Write((byte)value.Result);
             writer.Write(Safe(value.SessionId, 80));
             writer.Write(Safe(value.StatusKey, 80));
-            writer.Write(value.MealPrice);
-            writer.Write(value.WaterPrice);
-            writer.Write(value.CoffeePrice);
-            writer.Write(value.FirstAidPrice);
-            writer.Write(value.HeatPackPrice);
+            writer.Write(value.ConfigurationRevision);
+            writer.Write(value.HasConfiguration);
+            if (value.HasConfiguration)
+            {
+                writer.Write(value.MealPrice); writer.Write(value.WaterPrice); writer.Write(value.CoffeePrice);
+                writer.Write(value.FirstAidPrice); writer.Write(value.HeatPackPrice);
+                writer.Write(value.CannedFoodPrice); writer.Write(value.TeaPrice);
+                writer.Write(value.DisableNeedsConsumption);
+            }
             writer.Write(Safe(value.CabHeaterCarId, 80));
             writer.Write(value.CabHeaterLevel);
             writer.Write(Safe(value.ItemIdentity, 80));
             writer.Write(value.ItemUsedUnits);
             SurvivalStateCodec.Write(writer, value.State ?? new SurvivalState());
-            writer.Write(value.DisableNeedsConsumption);
         }
 
         public void Deserialize(BinaryReader reader)
@@ -184,24 +189,24 @@ namespace DVSurvival.Multiplayer
             }
             Message = new SurvivalStateMessage
             {
-                Protocol = protocol,
-                Sequence = reader.ReadUInt32(),
-                RequestId = reader.ReadUInt32(),
-                Result = (SurvivalResultCode)reader.ReadByte(),
-                SessionId = Safe(reader.ReadString(), 80),
-                StatusKey = Safe(reader.ReadString(), 80),
-                MealPrice = reader.ReadInt32(),
-                WaterPrice = reader.ReadInt32(),
-                CoffeePrice = reader.ReadInt32(),
-                FirstAidPrice = reader.ReadInt32(),
-                HeatPackPrice = reader.ReadInt32(),
-                CabHeaterCarId = Safe(reader.ReadString(), 80),
-                CabHeaterLevel = reader.ReadSingle(),
-                ItemIdentity = Safe(reader.ReadString(), 80),
-                ItemUsedUnits = reader.ReadInt32(),
-                State = SurvivalStateCodec.Read(reader),
-                DisableNeedsConsumption = reader.ReadBoolean()
+                Protocol = protocol, Sequence = reader.ReadUInt32(), RequestId = reader.ReadUInt32(),
+                Result = (SurvivalResultCode)reader.ReadByte(), SessionId = Safe(reader.ReadString(), 80),
+                StatusKey = Safe(reader.ReadString(), 80), ConfigurationRevision = reader.ReadUInt32(),
+                HasConfiguration = reader.ReadBoolean()
             };
+            if (Message.HasConfiguration)
+            {
+                Message.MealPrice = reader.ReadInt32(); Message.WaterPrice = reader.ReadInt32();
+                Message.CoffeePrice = reader.ReadInt32(); Message.FirstAidPrice = reader.ReadInt32();
+                Message.HeatPackPrice = reader.ReadInt32();
+                Message.CannedFoodPrice = reader.ReadInt32(); Message.TeaPrice = reader.ReadInt32();
+                Message.DisableNeedsConsumption = reader.ReadBoolean();
+            }
+            Message.CabHeaterCarId = Safe(reader.ReadString(), 80);
+            Message.CabHeaterLevel = reader.ReadSingle();
+            Message.ItemIdentity = Safe(reader.ReadString(), 80);
+            Message.ItemUsedUnits = reader.ReadInt32();
+            Message.State = SurvivalStateCodec.Read(reader);
         }
 
         private static string Safe(string value, int maximumLength)

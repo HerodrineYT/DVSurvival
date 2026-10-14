@@ -16,7 +16,6 @@ namespace DVSurvival.Mod
 {
     internal sealed class EnvironmentSampler
     {
-        private const float WorldObjectScanIntervalSeconds = 30f;
         private const float HeatedBuildingTemperature = 22f;
         private const float FireboxHeatRadiusMeters = 7f;
         private const string CabFanOutputPortId = "cabFan.OUTPUT";
@@ -26,13 +25,22 @@ namespace DVSurvival.Mod
         private readonly StationOfficeVolumes stationOffices = new StationOfficeVolumes();
         private readonly Dictionary<byte, Vector3> previousRemotePositions = new Dictionary<byte, Vector3>();
         private readonly Dictionary<byte, TrainCar> riddenCars = new Dictionary<byte, TrainCar>();
-        private Shop[] shops = new Shop[0];
-        private BedSleeping[] beds = new BedSleeping[0];
+        private readonly SurvivalEnvironment localSample = new SurvivalEnvironment();
+        private readonly SurvivalEnvironment remoteSample = new SurvivalEnvironment();
+        private readonly HashSet<DoorsAndWindowsController> controllerScratch = new HashSet<DoorsAndWindowsController>();
+        private readonly HashSet<OpenableControl> openingScratch = new HashSet<OpenableControl>();
+        private readonly List<DoorsAndWindowsController> controllerList = new List<DoorsAndWindowsController>();
+        private readonly List<OpenableControl> openingList = new List<OpenableControl>();
+        private readonly List<ControlImplBase> controlList = new List<ControlImplBase>();
+        private readonly GameObject[] cabRoots = new GameObject[4];
+        private readonly Dictionary<Transform, bool> shopClassification = new Dictionary<Transform, bool>();
+        private float shopClassificationExpires, roofExpires;
+        private Vector3 roofPosition, roofWorldMove;
+        private bool roofValue;
+        public void InvalidateSpatialCache() { roofExpires = 0f; shopClassification.Clear(); }
         private readonly Collider[] buildingProbe = new Collider[64];
         private readonly Collider[] trainProbe = new Collider[48];
         private WeatherDriver weather;
-        private float nextShopScan;
-        private float nextBedScan;
         private float nextWeatherProbe;
         private Transform cachedPlayerTransform;
         private CustomFirstPersonController cachedPlayerController;
@@ -40,7 +48,7 @@ namespace DVSurvival.Mod
         private GameObject cachedInterior;
         private GameObject cachedExternal;
         private readonly DiscoveryRetry cabScanRetry = new DiscoveryRetry();
-        private DoorsAndWindowsController[] cachedDoorsAndWindows = new DoorsAndWindowsController[0];
+        private readonly List<DoorsAndWindowsController> cachedDoorsAndWindows = new List<DoorsAndWindowsController>();
         private FireboxSimController cachedFirebox;
         private EngineOnReader cachedEngineOn;
         private ControlImplBase cachedCabFanControl;
@@ -49,8 +57,8 @@ namespace DVSurvival.Mod
         private LocoSim.Implementations.Port cachedRpmNormalized, cachedIdleRpmNormalized, cachedEngineOnPort;
         private LocoSim.Implementations.Port cachedCabFanOutputPort;
         private bool cachedCabScanComplete;
-        private OpenableControl[] cachedOpenables = new OpenableControl[0];
-        private ControlImplBase[] cachedOpeningControls = new ControlImplBase[0];
+        private readonly List<OpenableControl> cachedOpenables = new List<OpenableControl>();
+        private readonly List<ControlImplBase> cachedOpeningControls = new List<ControlImplBase>();
         private readonly Dictionary<TrainCar, CabHistory> cabHistory = new Dictionary<TrainCar, CabHistory>();
         private readonly CabinDiagnosticStatus cabinStatus = new CabinDiagnosticStatus();
         public string CabinStatus { get { return cabinStatus.Text; } }
@@ -71,7 +79,7 @@ namespace DVSurvival.Mod
         {
             cabinStatus.Clear();
             var transform = PlayerManager.PlayerTransform;
-            if (transform == null) return Default(gameHours);
+            if (transform == null) return Default(localSample, gameHours);
             var inCar = PlayerManager.Car != null;
             var inLocomotive = inCar && PlayerManager.Car.IsLoco;
             if (transform != cachedPlayerTransform)
@@ -89,12 +97,12 @@ namespace DVSurvival.Mod
             if (controller != null && controller.m_Input.sqrMagnitude > 0.01f)
                 activity = controller.m_IsWalking ? 0.45f : 1f;
             var underwater = controller != null && controller.underwater;
-            return Sample(position, gameHours, inCar, inLocomotive, activity, underwater, true);
+            return Sample(localSample, position, gameHours, inCar, inLocomotive, activity, underwater, true);
         }
 
         public SurvivalEnvironment SampleRemote(SurvivalPlayerInfo player, float gameHours, float realSeconds)
         {
-            if (player == null) return Default(gameHours);
+            if (player == null) return Default(remoteSample, gameHours);
             var position = new Vector3(player.PositionX, player.PositionY, player.PositionZ);
             var activity = 0f;
             Vector3 previous;
@@ -104,7 +112,7 @@ namespace DVSurvival.Mod
                 if (speed < 30f) activity = Mathf.Clamp01(speed / 7f);
             }
             previousRemotePositions[player.PlayerId] = position;
-            return Sample(position, gameHours, player.IsOnCar, player.OccupiedCarIsLocomotive,
+            return Sample(remoteSample, position, gameHours, player.IsOnCar, player.OccupiedCarIsLocomotive,
                 activity, false, false);
         }
 
@@ -227,13 +235,11 @@ namespace DVSurvival.Mod
         public void Reset()
         {
             riddenCars.Clear();
-            shops = new Shop[0];
-            beds = new BedSleeping[0];
+            SurvivalWorldRegistry.Reset();
+            InvalidateSpatialCache();
             FireboxRegistry.Reset();
             StationOfficeVolumes.Reset();
             weather = null;
-            nextShopScan = 0f;
-            nextBedScan = 0f;
             nextWeatherProbe = 0f;
             cachedPlayerTransform = null;
             cachedPlayerController = null;
@@ -254,7 +260,7 @@ namespace DVSurvival.Mod
             cachedInterior = null;
             cachedExternal = null;
             cabScanRetry.Reset();
-            cachedDoorsAndWindows = new DoorsAndWindowsController[0];
+            cachedDoorsAndWindows.Clear();
             cachedFirebox = null;
             cachedEngineOn = null;
             cachedCabFanControl = null;
@@ -263,8 +269,11 @@ namespace DVSurvival.Mod
             cachedRpmNormalized = cachedIdleRpmNormalized = cachedEngineOnPort = null;
             cachedCabFanOutputPort = null;
             cachedCabScanComplete = false;
-            cachedOpenables = new OpenableControl[0];
-            cachedOpeningControls = new ControlImplBase[0];
+            cachedOpenables.Clear();
+            cachedOpeningControls.Clear();
+            controllerScratch.Clear(); openingScratch.Clear();
+            controllerList.Clear(); openingList.Clear(); controlList.Clear();
+            Array.Clear(cabRoots, 0, cabRoots.Length);
         }
 
         public float GetDayLengthMinutes()
@@ -307,13 +316,16 @@ namespace DVSurvival.Mod
             catch { return false; }
         }
 
-        private SurvivalEnvironment Sample(Vector3 position, float gameHours, bool inCar,
+        private SurvivalEnvironment Sample(SurvivalEnvironment target, Vector3 position, float gameHours, bool inCar,
             bool inLocomotive, float activity, bool underwater, bool isLocalPlayer)
         {
+            using (new SurvivalProfiler("DVSurvival.Environment.Sample"))
+            {
             ProbeWeather();
             var rain = weather == null ? 0f : Mathf.Clamp01(weather.RainValue.CurrentValue);
             var wind = weather == null ? 0f : Mathf.Clamp((float)weather.WindSpeed, 0f, 80f);
-            var roof = inCar || HasRoof(position);
+            if (inCar) roofExpires = 0f;
+            var roof = inCar || (isLocalPlayer ? CachedRoof(position) : HasRoof(position));
             var exposure = inCar ? 0.10f : (roof ? 0.28f : 1f);
             var shelterWarmth = inCar ? 2.5f : 0f;
             bool isWinter;
@@ -357,18 +369,17 @@ namespace DVSurvival.Mod
                 rain = 1f;
                 thermalRecovery = 1f;
             }
-            return new SurvivalEnvironment
-            {
-                GameHours = gameHours,
-                AmbientTemperatureCelsius = ambient,
-                RainIntensity = rain,
-                WindSpeedMetersPerSecond = wind,
-                Exposure = exposure,
-                Activity = Mathf.Clamp01(activity),
-                ShelterWarmthCelsius = shelterWarmth,
-                ThermalRecoveryMultiplier = thermalRecovery,
-                IsWinter = isWinter
-            };
+            target.GameHours = gameHours;
+            target.AmbientTemperatureCelsius = ambient;
+            target.RainIntensity = rain;
+            target.WindSpeedMetersPerSecond = wind;
+            target.Exposure = exposure;
+            target.Activity = Mathf.Clamp01(activity);
+            target.ShelterWarmthCelsius = shelterWarmth;
+            target.ThermalRecoveryMultiplier = thermalRecovery;
+            target.IsWinter = isWinter;
+            return target;
+            }
         }
 
         private void ApplyLocomotiveClimate(TrainCar car, Vector3 position, float outside,
@@ -377,11 +388,11 @@ namespace DVSurvival.Mod
         {
             RefreshCabComponents(car);
             var open = false;
-            for (int i = 0; !open && i < cachedDoorsAndWindows.Length; i++)
+            for (int i = 0; !open && i < cachedDoorsAndWindows.Count; i++)
                 try { open = cachedDoorsAndWindows[i] != null && cachedDoorsAndWindows[i].AnythingOpen(); }
                 catch { /* Other initialized controllers/direct controls can still report openings. */ }
             // Direct cached controls also cover interiors whose controller has not initialized its entries.
-            for (int i = 0; !open && i < cachedOpenables.Length; i++)
+            for (int i = 0; !open && i < cachedOpenables.Count; i++)
             {
                 var control = cachedOpeningControls[i];
                 var opening = cachedOpenables[i];
@@ -456,7 +467,7 @@ namespace DVSurvival.Mod
             float sharedCabAir = settings.UseDvSeasonsTemperature && SeasonsCabHeating.Active
                 ? SeasonsCabHeating.GetCabinTemperature(car) : float.NaN;
             if (!float.IsNaN(sharedCabAir) && !float.IsInfinity(sharedCabAir)) ambient = sharedCabAir;
-            cabinStatus.Capture(open, cachedOpenables.Length, isDm1u, isVanillaDieselHeater,
+            cabinStatus.Capture(open, cachedOpenables.Count, isDm1u, isVanillaDieselHeater,
                 isDm1u ? dm1uHeaterOn : vanillaDieselHeaterOn, fanOn, running, outside);
             ambient = Mathf.Clamp(ambient, SurvivalEnvironment.MinimumAirTemperature, SurvivalEnvironment.MaximumAirTemperature);
             rain *= open ? 0.22f : 0f;
@@ -468,6 +479,8 @@ namespace DVSurvival.Mod
 
         private void RefreshCabComponents(TrainCar car)
         {
+            using (new SurvivalProfiler("DVSurvival.Environment.CabDiscovery"))
+            {
             var interior = car == null ? null : car.loadedInterior;
             var external = car == null ? null : car.loadedExternalInteractables;
             var flow = car == null || car.SimController == null ? null : car.SimController.SimulationFlow;
@@ -487,23 +500,28 @@ namespace DVSurvival.Mod
                 if (!heaterControlReady) heaterControlReady = cabHeaters.IsSetupSettled(car);
             }
             // Persistent cabin and external door objects are not necessarily children of loadedInterior.
-            var controllers = new HashSet<DoorsAndWindowsController>();
-            var openings = new HashSet<OpenableControl>();
-            var roots = new[] { car == null ? null : car.gameObject, interior, external,
-                car == null || car.interior == null ? null : car.interior.gameObject };
+            var controllers = controllerScratch;
+            controllers.Clear();
+            var openings = openingScratch;
+            openings.Clear();
+            cabRoots[0] = car == null ? null : car.gameObject; cabRoots[1] = interior; cabRoots[2] = external;
+            cabRoots[3] = car == null || car.interior == null ? null : car.interior.gameObject;
+            var roots = cabRoots;
             foreach (var root in roots)
             {
                 if (root == null) continue;
-                foreach (var value in root.GetComponentsInChildren<DoorsAndWindowsController>(true))
+                root.GetComponentsInChildren(true, controllerList);
+                foreach (var value in controllerList)
                 {
                     controllers.Add(value);
                     if (value.entries != null)
                         foreach (var opening in value.entries) if (opening != null) openings.Add(opening);
                 }
-                foreach (var opening in root.GetComponentsInChildren<OpenableControl>(true)) openings.Add(opening);
+                root.GetComponentsInChildren(true, openingList);
+                foreach (var opening in openingList) openings.Add(opening);
             }
-            cachedDoorsAndWindows = new DoorsAndWindowsController[controllers.Count];
-            controllers.CopyTo(cachedDoorsAndWindows);
+            cachedDoorsAndWindows.Clear();
+            foreach (var value in controllers) cachedDoorsAndWindows.Add(value);
             cachedFirebox = car == null ? null : car.GetComponentInChildren<FireboxSimController>(true);
             cachedEngineOn = car == null ? null : car.GetComponentInChildren<EngineOnReader>(true);
             cachedClimateFlow = flow;
@@ -545,15 +563,17 @@ namespace DVSurvival.Mod
                     if (cachedEngineOnPort != null) break;
                 }
             }
-            cachedOpenables = new OpenableControl[openings.Count];
-            openings.CopyTo(cachedOpenables);
-            cachedOpeningControls = new ControlImplBase[cachedOpenables.Length];
-            for (int i = 0; i < cachedOpenables.Length; i++)
-                cachedOpeningControls[i] = cachedOpenables[i].GetComponent<ControlImplBase>();
+            cachedOpenables.Clear(); cachedOpeningControls.Clear();
+            foreach (var opening in openings)
+            {
+                cachedOpenables.Add(opening);
+                cachedOpeningControls.Add(opening.GetComponent<ControlImplBase>());
+            }
             cachedCabFanControl = null;
             cachedDm1uHeaterControl = null;
             if (interior == null) return;
-            foreach (var control in interior.GetComponentsInChildren<ControlImplBase>(true))
+            interior.GetComponentsInChildren(true, controlList);
+            foreach (var control in controlList)
             {
                 if (control == null) continue;
                 if (cachedCabFanControl == null && IsCabFanName(control.transform))
@@ -569,6 +589,7 @@ namespace DVSurvival.Mod
                 // Successful setup and a bounded final heater failure stop hierarchy scans;
                 // transient failures retain quick bootstrap retries then a slow recovery path.
                 : heaterControlReady;
+            }
         }
 
         private static bool TryGetFireboxTemperature(TrainCar car, out float temperature)
@@ -590,12 +611,15 @@ namespace DVSurvival.Mod
 
         private void ApplyNearbyFireboxHeat(Vector3 position, ref float ambient)
         {
+            using (new SurvivalProfiler("DVSurvival.Environment.Firebox"))
+            {
             var best = ambient;
             foreach (var firebox in FireboxRegistry.GetLoaded())
             {
                 if (firebox == null || !firebox.gameObject.activeInHierarchy) continue;
-                var distanceFactor = Mathf.Clamp01(1f -
-                    Vector3.Distance(position, firebox.transform.position) / FireboxHeatRadiusMeters);
+                var squaredDistance = (position - firebox.transform.position).sqrMagnitude;
+                if (squaredDistance >= FireboxHeatRadiusMeters * FireboxHeatRadiusMeters) continue;
+                var distanceFactor = 1f - Mathf.Sqrt(squaredDistance) / FireboxHeatRadiusMeters;
                 if (distanceFactor <= 0f) continue;
                 try
                 {
@@ -611,10 +635,13 @@ namespace DVSurvival.Mod
                 catch (NullReferenceException) { }
             }
             ambient = Mathf.Clamp(best, SurvivalEnvironment.MinimumAirTemperature, SurvivalEnvironment.MaximumAirTemperature);
+            }
         }
 
         private bool IsInsideHeatedShop(Vector3 position, bool hasRoof)
         {
+            using (new SurvivalProfiler("DVSurvival.Environment.ShopProbe"))
+            {
             // Shop interiors use their existing collision/proximity detection.
             // Station offices are handled by their exact native room volumes.
             var count = Physics.OverlapSphereNonAlloc(position, 0.2f, buildingProbe,
@@ -623,13 +650,14 @@ namespace DVSurvival.Mod
             {
                 var collider = buildingProbe[index];
                 buildingProbe[index] = null;
-                if (collider != null && IsHeatedShopName(collider.transform) &&
+                if (collider != null && IsCachedHeatedShop(collider.transform) &&
                     (collider.ClosestPoint(position) - position).sqrMagnitude < 0.0001f)
                     return true;
             }
             // Shops do not all have a dedicated interior trigger. Keep the proximity fallback,
             // but require a roof so the heated zone cannot leak into the street.
             return hasRoof && IsNear(position, 22f, true);
+            }
         }
 
         private static Vector3 BuildingProbePosition(Vector3 fallback, bool isLocalPlayer)
@@ -651,8 +679,8 @@ namespace DVSurvival.Mod
         {
             for (var depth = 0; transform != null && depth < 7; depth++, transform = transform.parent)
             {
-                var normalized = NormalizeName(transform.name);
-                if (normalized.Contains("itemshopinterior") || normalized.Contains("shopinterior"))
+                var name = transform.name;
+                if (NormalizedName.Contains(name, "shopinterior"))
                     return true;
             }
             return false;
@@ -662,8 +690,8 @@ namespace DVSurvival.Mod
         {
             for (var depth = 0; transform != null && depth < 4; depth++, transform = transform.parent)
             {
-                var normalized = NormalizeName(transform.name);
-                if (normalized.Contains("cabfan") || normalized.Contains("fanswitch")) return true;
+                var name = transform.name;
+                if (NormalizedName.Contains(name, "cabfan") || NormalizedName.Contains(name, "fanswitch")) return true;
             }
             return false;
         }
@@ -674,8 +702,8 @@ namespace DVSurvival.Mod
             // Match that unique control rather than other locomotives' decorative CabHeater labels.
             for (var depth = 0; transform != null && depth < 4; depth++, transform = transform.parent)
             {
-                var normalized = NormalizeName(transform.name);
-                if (normalized == "cheatingrotary" || normalized == "heatingrotary") return true;
+                var name = transform.name;
+                if (NormalizedName.Contains(name, "cheatingrotary", true) || NormalizedName.Contains(name, "heatingrotary", true)) return true;
             }
             return false;
         }
@@ -689,11 +717,25 @@ namespace DVSurvival.Mod
                 car.carType == TrainCarType.LocoDiesel;
         }
 
-        private static string NormalizeName(string value)
+        private bool IsCachedHeatedShop(Transform transform)
         {
-            return string.IsNullOrEmpty(value) ? string.Empty :
-                value.Replace("_", string.Empty).Replace("-", string.Empty)
-                    .Replace(" ", string.Empty).ToLowerInvariant();
+            if (Time.realtimeSinceStartup >= shopClassificationExpires || shopClassification.Count >= 2048)
+            { shopClassification.Clear(); shopClassificationExpires = Time.realtimeSinceStartup + 30f; }
+            bool result;
+            if (!shopClassification.TryGetValue(transform, out result))
+            { result = IsHeatedShopName(transform); shopClassification[transform] = result; }
+            return result;
+        }
+
+        private bool CachedRoof(Vector3 position)
+        {
+            var now = Time.realtimeSinceStartup;
+            if (now >= roofExpires || (position - roofPosition).sqrMagnitude > .04f || roofWorldMove != WorldMover.currentMove)
+            {
+                roofValue = HasRoof(position); roofPosition = position;
+                roofWorldMove = WorldMover.currentMove; roofExpires = now + .9f;
+            }
+            return roofValue;
         }
 
         private float GetAmbientTemperature(Vector3 position, float rain, out bool isWinter)
@@ -730,32 +772,16 @@ namespace DVSurvival.Mod
             var maxSqr = distance * distance;
             if (shop)
             {
-                RefreshShops();
-                foreach (var value in shops)
-                    if (value != null && (value.transform.position - position).sqrMagnitude <= maxSqr) return true;
+                foreach (var value in SurvivalWorldRegistry.Shops)
+                    if (value != null && value.gameObject.activeInHierarchy && (value.transform.position - position).sqrMagnitude <= maxSqr) return true;
             }
             else
             {
-                RefreshBeds();
-                foreach (var value in beds)
-                    if (value != null && ((value.transform.position - position).sqrMagnitude <= maxSqr ||
+                foreach (var value in SurvivalWorldRegistry.Beds)
+                    if (value != null && value.gameObject.activeInHierarchy && ((value.transform.position - position).sqrMagnitude <= maxSqr ||
                         (value.pillowTarget != null && (value.pillowTarget.position - position).sqrMagnitude <= maxSqr))) return true;
             }
             return false;
-        }
-
-        private void RefreshShops()
-        {
-            if (Time.realtimeSinceStartup < nextShopScan) return;
-            nextShopScan = Time.realtimeSinceStartup + WorldObjectScanIntervalSeconds;
-            shops = UnityEngine.Object.FindObjectsOfType<Shop>() ?? new Shop[0];
-        }
-
-        private void RefreshBeds()
-        {
-            if (Time.realtimeSinceStartup < nextBedScan) return;
-            nextBedScan = Time.realtimeSinceStartup + WorldObjectScanIntervalSeconds;
-            beds = UnityEngine.Object.FindObjectsOfType<BedSleeping>() ?? new BedSleeping[0];
         }
 
         private void ProbeWeather()
@@ -772,14 +798,12 @@ namespace DVSurvival.Mod
                 Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         }
 
-        private static SurvivalEnvironment Default(float gameHours)
+        private static SurvivalEnvironment Default(SurvivalEnvironment target, float gameHours)
         {
-            return new SurvivalEnvironment
-            {
-                GameHours = gameHours,
-                AmbientTemperatureCelsius = 18f,
-                Exposure = 0.5f
-            };
+            target.GameHours = gameHours; target.AmbientTemperatureCelsius = 18f;
+            target.RainIntensity = target.WindSpeedMetersPerSecond = target.Activity = target.ShelterWarmthCelsius = 0f;
+            target.Exposure = .5f; target.ThermalRecoveryMultiplier = 1f; target.IsWinter = false;
+            return target;
         }
     }
 }

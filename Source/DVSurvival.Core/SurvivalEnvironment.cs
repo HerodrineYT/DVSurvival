@@ -19,18 +19,22 @@ namespace DVSurvival.Core
 
         public SurvivalEnvironment Clone()
         {
-            return new SurvivalEnvironment
-            {
-                GameHours = GameHours,
-                AmbientTemperatureCelsius = AmbientTemperatureCelsius,
-                RainIntensity = RainIntensity,
-                WindSpeedMetersPerSecond = WindSpeedMetersPerSecond,
-                Exposure = Exposure,
-                Activity = Activity,
-                ShelterWarmthCelsius = ShelterWarmthCelsius,
-                ThermalRecoveryMultiplier = ThermalRecoveryMultiplier,
-                IsWinter = IsWinter
-            };
+            var copy = new SurvivalEnvironment();
+            CopyTo(copy);
+            return copy;
+        }
+
+        public void CopyTo(SurvivalEnvironment target)
+        {
+            target.GameHours = GameHours;
+            target.AmbientTemperatureCelsius = AmbientTemperatureCelsius;
+            target.RainIntensity = RainIntensity;
+            target.WindSpeedMetersPerSecond = WindSpeedMetersPerSecond;
+            target.Exposure = Exposure;
+            target.Activity = Activity;
+            target.ShelterWarmthCelsius = ShelterWarmthCelsius;
+            target.ThermalRecoveryMultiplier = ThermalRecoveryMultiplier;
+            target.IsWinter = IsWinter;
         }
 
         public bool IsValid()

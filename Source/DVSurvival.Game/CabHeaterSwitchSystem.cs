@@ -35,6 +35,9 @@ namespace DVSurvival.Mod
         private readonly Dictionary<Mesh, NativeHeaterGeometry> geometryCache =
             new Dictionary<Mesh, NativeHeaterGeometry>();
         private bool disposed;
+        private static readonly List<Collider> colliderScratch = new List<Collider>();
+        private static readonly List<MonoBehaviour> behaviourScratch = new List<MonoBehaviour>();
+        private readonly List<SwitchBinding> resetScratch = new List<SwitchBinding>();
 
         public CabHeaterSwitchSystem(Action<string, float> onUserToggle)
         {
@@ -148,7 +151,9 @@ namespace DVSurvival.Mod
 
         public void Reset()
         {
-            var snapshot = new List<SwitchBinding>(bindings.Values);
+            var snapshot = resetScratch;
+            snapshot.Clear();
+            foreach (var binding in bindings.Values) snapshot.Add(binding);
             bindings.Clear();
             failedInteriorAttempts.Clear();
             states.Clear();
@@ -157,6 +162,8 @@ namespace DVSurvival.Mod
                 snapshot[i].SetValue(0f);
                 snapshot[i].Detach(true);
             }
+            snapshot.Clear();
+            colliderScratch.Clear(); behaviourScratch.Clear();
         }
 
         private bool UseSeasons()
@@ -364,8 +371,10 @@ namespace DVSurvival.Mod
         {
             // Keep serialized collider GameObjects/VR references, but fit the collision shape
             // to the actual stock rocker instead of the differently shaped DM3 template.
-            foreach (var collider in root.GetComponentsInChildren<Collider>(true))
+            root.GetComponentsInChildren(true, colliderScratch);
+            foreach (var collider in colliderScratch)
                 UnityEngine.Object.DestroyImmediate(collider);
+            colliderScratch.Clear();
             var hit = new GameObject("Stock heater rocker collider");
             hit.layer = root.gameObject.layer;
             hit.transform.SetParent(root, false);
@@ -380,8 +389,10 @@ namespace DVSurvival.Mod
                 var area = spec.nonVrStaticInteractionArea.transform;
                 area.localPosition = Vector3.zero;
                 area.localRotation = Quaternion.identity;
-                foreach (var collider in area.GetComponentsInChildren<Collider>(true))
+                area.GetComponentsInChildren(true, colliderScratch);
+                foreach (var collider in colliderScratch)
                     UnityEngine.Object.DestroyImmediate(collider);
+                colliderScratch.Clear();
                 var areaBox = area.gameObject.AddComponent<BoxCollider>();
                 areaBox.center = bounds.center;
                 areaBox.size = bounds.size + Vector3.one * 0.006f;
@@ -403,14 +414,16 @@ namespace DVSurvival.Mod
 
         private static void RemoveSimulationFeeders(GameObject root)
         {
-            var behaviours = root.GetComponentsInChildren<MonoBehaviour>(true);
-            for (int i = 0; i < behaviours.Length; i++)
+            root.GetComponentsInChildren(true, behaviourScratch);
+            var behaviours = behaviourScratch;
+            for (int i = 0; i < behaviours.Count; i++)
             {
                 var behaviour = behaviours[i];
                 if (behaviour != null && string.Equals(behaviour.GetType().FullName,
                     "DV.Simulation.Ports.InteractablePortFeeder", StringComparison.Ordinal))
                     UnityEngine.Object.DestroyImmediate(behaviour);
             }
+            behaviourScratch.Clear();
         }
 
         private static Transform FindRelative(Transform root, string path)

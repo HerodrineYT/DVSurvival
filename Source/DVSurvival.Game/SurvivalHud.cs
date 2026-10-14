@@ -22,7 +22,11 @@ namespace DVSurvival.Mod
         private string healthLabel, hungerLabel, hydrationLabel, restLabel;
         private string warningTitle = string.Empty;
         private string warningText = string.Empty;
-        private readonly System.Text.StringBuilder warningBuilder = new System.Text.StringBuilder(128);
+        private readonly NeedsPresenter presenter = new NeedsPresenter();
+        private ProvisionUseAction displayedUse;
+        private string useTitle, useHint;
+        private float nextUseTextRefresh;
+        private bool useTextRussian;
         private string healthText = string.Empty;
         private string hungerText = string.Empty;
         private string hydrationText = string.Empty;
@@ -80,7 +84,9 @@ namespace DVSurvival.Mod
 
         private void Update()
         {
-            if (!CanDisplay()) return;
+            var visible = CanDisplay();
+            UpdateHudDrag(visible);
+            if (!visible) return;
             RefreshDisplayCache();
             FlushPendingWarning();
         }
@@ -111,25 +117,33 @@ namespace DVSurvival.Mod
             EnsureStyles();
             if (healthLabel == null) RefreshDisplayCache(true);
             var oldMatrix = GUI.matrix;
-            // Fit the selected compact group, including padding and the conditional warning.
-            var scale = HudLayout.FitScale(settings.HudStyle, settings.HudScale, Screen.width, Screen.height, settings.CompactHudScale);
-            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-            if (settings.ShowHud && repaint) DrawLayout(scale);
-            if (repaint && !string.IsNullOrEmpty(toast) && Time.realtimeSinceStartup < toastUntil)
+            // A shared percentage for all styles; panel contents retain their own proportions.
+            var scale = CurrentHudScale();
+            try
             {
-                var width = Math.Min(620f, Screen.width / scale - 40f);
-                DrawToast(new Rect((Screen.width / scale - width) * 0.5f, 24f, width, 46f), toast);
+                if (settings.ShowHud && repaint) DrawLayout(scale);
+                GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+                if (repaint && !string.IsNullOrEmpty(toast) && Time.realtimeSinceStartup < toastUntil)
+                {
+                    var width = Math.Min(620f, Screen.width / scale - 40f);
+                    DrawToast(new Rect((Screen.width / scale - width) * 0.5f, 24f, width, 46f), toast);
+                }
             }
-            GUI.matrix = oldMatrix;
+            finally { GUI.matrix = oldMatrix; }
             var use = ProvisionUseAction.Active;
             if (use != null)
             {
                 var box = new Rect((Screen.width - 280f) / 2f, Screen.height * 0.72f, 280f, 62f);
-                DrawProvisionStatus(box,
-                    ModLocalization.Provision(use.Kind) + (use.IsPortion ? " — " +
-                        ModLocalization.Number(use.Progress * 100f, "F1") + "%" : string.Empty), use.Progress,
-                    use.IsPortion ? ModLocalization.Text("Удерживайте ЛКМ — есть / пить", "Hold LMB to eat / drink") :
-                    ModLocalization.Text("ПКМ / убрать предмет — отмена", "RMB / put item away to cancel"));
+                var russian = ModLocalization.IsRussian;
+                if (displayedUse != use || useTextRussian != russian || Time.realtimeSinceStartup >= nextUseTextRefresh)
+                {
+                    displayedUse = use; useTextRussian = russian; nextUseTextRefresh = Time.realtimeSinceStartup + .1f;
+                    useTitle = ModLocalization.Provision(use.Kind) + (use.IsPortion ? " — " +
+                        ModLocalization.Number(use.Progress * 100f, "F1") + "%" : string.Empty);
+                    useHint = use.IsPortion ? ModLocalization.Text("Удерживайте ЛКМ — есть / пить", "Hold LMB to eat / drink") :
+                        ModLocalization.Text("ПКМ / убрать предмет — отмена", "RMB / put item away to cancel");
+                }
+                DrawProvisionStatus(box, useTitle, use.Progress, useHint);
             }
         }
 
@@ -151,6 +165,8 @@ namespace DVSurvival.Mod
 
         private void RefreshDisplayCache(bool force = false)
         {
+            using (new SurvivalProfiler("DVSurvival.HUD.Refresh"))
+            {
             var now = Time.realtimeSinceStartup;
             if (!force && now < nextDisplayRefresh) return;
             nextDisplayRefresh = now + 0.25f;
@@ -168,65 +184,18 @@ namespace DVSurvival.Mod
             restFraction = state.Rest / 100f;
             cachedBodyTemperature = state.BodyTemperatureCelsius;
             temperatureFraction = Mathf.InverseLerp(34f, 40f, cachedBodyTemperature);
-            healthText = FormatNeed(state.Health);
-            hungerText = FormatNeed(state.Hunger);
-            hydrationText = FormatNeed(state.Hydration);
-            restText = FormatNeed(state.Rest);
-            healthLabel = ModLocalization.Text("Здоровье", "Health");
-            hungerLabel = ModLocalization.Text("Сытость", "Food");
-            hydrationLabel = ModLocalization.Text("Вода", "Water");
-            restLabel = ModLocalization.Text("Сон", "Rest");
-            var ambient = runtime.CurrentEnvironment == null ? 0f :
-                runtime.CurrentEnvironment.AmbientTemperatureCelsius;
-            ambientText = ModLocalization.Text("Воздух: ", "Ambient: ") +
-                ModLocalization.Number(ambient, "F1") + " °C";
-            warningBuilder.Length = 0;
-            if (settings.ShowStatusWarnings)
-            {
-                if (state.Health < 40f) AddWarning(healthLabel);
-                if (state.Hunger < 25f) AddWarning(hungerLabel);
-                if (state.Hydration < 30f) AddWarning(hydrationLabel);
-                if (state.Rest < 30f) AddWarning(restLabel);
-                if (cachedBodyTemperature < 35f) AddWarning(ModLocalization.Text("Холод", "Cold"));
-                if (cachedBodyTemperature >= 38.5f) AddWarning(ModLocalization.Text("Перегрев", "Overheating"));
-                if (state.LowRestGameHours >= SleepDeprivationEffects.HallucinationThresholdHours)
-                    AddWarning(ModLocalization.Text("Спидометр ÷", "Speedometer ÷") +
-                        ModLocalization.Number(SleepDeprivationEffects.DisplaySpeedDivisor(state), "0.0"));
-                else if (state.LowRestGameHours >= SleepDeprivationEffects.ExhaustionThresholdHours)
-                    AddWarning(ModLocalization.Text("Истощение", "Exhaustion"));
-                else if (state.LowRestGameHours >= 24d)
-                    AddWarning(ModLocalization.Text("Недосып", "Sleep deprivation"));
-            }
-            warningText = string.Empty;
-            warningTitle = state.Health <= 10f || cachedBodyTemperature < 34f || cachedBodyTemperature > 40f ||
-                state.LowRestGameHours >= SleepDeprivationEffects.ExhaustionThresholdHours
-                ? ModLocalization.Text("Критическое состояние", "Critical condition")
-                : ModLocalization.Text("Требуется внимание", "Needs attention");
             needFractions[0] = healthFraction; needFractions[1] = hungerFraction;
             needFractions[2] = hydrationFraction; needFractions[3] = restFraction;
-            needValues[0] = healthText; needValues[1] = hungerText;
-            needValues[2] = hydrationText; needValues[3] = restText;
-            for (var i = 0; i < 4; i++)
-                needValues[i] = NeedAlertText.Format(state, i, needValues[i], settings.ShowStatusWarnings);
-            needNames[0] = healthLabel; needNames[1] = hungerLabel;
-            needNames[2] = hydrationLabel; needNames[3] = restLabel;
-            compactBodyText = ModLocalization.Text("Тело: ", "Body: ") +
-                ModLocalization.Number(cachedBodyTemperature, "F1") + " °C";
-            legacyBodyText = ModLocalization.Text("Температура тела  ", "Body temperature  ") +
-                ModLocalization.Number(cachedBodyTemperature, "F1") + " °C";
-            if (settings.ShowStatusWarnings && (cachedBodyTemperature > 38.5f || cachedBodyTemperature < 35f))
-            {
-                compactBodyText = "<color=#FF5555>! " + compactBodyText + "</color>";
-                legacyBodyText = "<color=#FF5555>! " + legacyBodyText + "</color>";
+            var ambient = runtime.CurrentEnvironment == null ? 0f : runtime.CurrentEnvironment.AmbientTemperatureCelsius;
+            presenter.Capture(state, ambient, settings.ShowNumericValues, settings.ShowStatusWarnings);
+            healthLabel = presenter.Names[0]; hungerLabel = presenter.Names[1];
+            hydrationLabel = presenter.Names[2]; restLabel = presenter.Names[3];
+            healthText = presenter.Numbers[0]; hungerText = presenter.Numbers[1];
+            hydrationText = presenter.Numbers[2]; restText = presenter.Numbers[3];
+            for (int i = 0; i < 4; i++) { needNames[i] = presenter.Names[i]; needValues[i] = presenter.Alerts[i]; }
+            ambientText = presenter.Ambient; compactBodyText = presenter.Body; legacyBodyText = presenter.LegacyBody;
+            warningTitle = presenter.WarningTitle; warningText = string.Empty;
             }
-            if (settings.ShowStatusWarnings && ambient > 55f)
-                ambientText = "<color=#FF5555>! " + ambientText + "</color>";
-        }
-
-        private void AddWarning(string label)
-        {
-            if (warningBuilder.Length > 0) warningBuilder.Append(" · ");
-            warningBuilder.Append(label);
         }
 
         private void QueueStateWarning(SurvivalWarningEvent events)
@@ -399,6 +368,7 @@ namespace DVSurvival.Mod
 
         private void OnDestroy()
         {
+            FinishHudDrag();
             if (artwork != null) artwork.Dispose();
             if (hudFont != null) UnityEngine.Object.Destroy(hudFont);
         }

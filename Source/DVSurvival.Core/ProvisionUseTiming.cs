@@ -7,6 +7,7 @@ namespace DVSurvival.Core
             switch (kind)
             {
                 case ProvisionKind.Meal: return 5f;
+                case ProvisionKind.CannedFood: return 6f;
                 case ProvisionKind.FirstAid: return 8f;
                 default: return 3f;
             }

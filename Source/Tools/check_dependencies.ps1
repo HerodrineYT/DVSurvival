@@ -53,9 +53,24 @@ if (-not $Offline) {
     Write-Host "Official latest Multiplayer: $latestVersion (matches the tested lock)."
 
     Write-Host 'Checking the official Language Helper release feed...'
-    $languageFeed = Invoke-RestMethod -Uri $lock.languageHelper.releaseFeed -Headers @{
-        'User-Agent' = 'DVSurvival-dependency-audit'
-    } -TimeoutSec 30
+    try {
+        $languageFeed = Invoke-RestMethod -Uri $lock.languageHelper.releaseFeed -Headers @{
+            'User-Agent' = 'DVSurvival-dependency-audit'
+        } -TimeoutSec 30
+    }
+    catch {
+        Write-Warning 'Language Helper feed is unavailable; checking its official GitHub release.'
+        $languageRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/derail-valley-modding/language-helper/releases/latest' -Headers @{
+            'User-Agent' = 'DVSurvival-dependency-audit'
+        } -TimeoutSec 30
+        if ($languageRelease.tag_name -notmatch '^v?(\d+\.\d+\.\d+)$') { throw 'Invalid Language Helper official release tag.' }
+        $languageVersion = $Matches[1]
+        $languageAssets = @($languageRelease.assets | Where-Object { $_.name -eq 'DVLangHelper.zip' })
+        if ($languageAssets.Count -ne 1) { throw 'Language Helper official release asset is missing or ambiguous.' }
+        $languageFeed = [pscustomobject]@{ Releases = @([pscustomobject]@{
+            Id = 'DVLangHelper'; Version = $languageVersion; DownloadUrl = $languageAssets[0].browser_download_url
+        }) }
+    }
     $latestLanguage = $languageFeed.Releases | Where-Object { $_.Id -eq 'DVLangHelper' } |
         Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1
     if ($null -eq $latestLanguage -or [version]$latestLanguage.Version -ne [version]$lock.languageHelper.auditedVersion -or

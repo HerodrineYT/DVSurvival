@@ -11,7 +11,7 @@ namespace DVSurvival.Core
             Guid parsed;
             if (consumed == null || state == null || tuning == null || identity == null || identity.Length != 36 ||
                 !Guid.TryParse(identity, out parsed) || parsed == Guid.Empty ||
-                kind < ProvisionKind.Meal || kind > ProvisionKind.HeatPack)
+                !ProvisionCatalog.IsSupported(kind))
                 return SurvivalResultCode.InvalidRequest;
             identity = parsed.ToString("D");
             // Retries retire a duplicate model without applying the effect a second time.

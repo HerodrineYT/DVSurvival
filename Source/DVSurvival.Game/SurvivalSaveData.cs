@@ -35,11 +35,15 @@ namespace DVSurvival.Mod
         public HashSet<string> ConsumedItems = new HashSet<string>(StringComparer.Ordinal);
         public Dictionary<string, PartialProvisionRecord> PartialItems = new Dictionary<string, PartialProvisionRecord>(StringComparer.Ordinal);
         public List<CabHeaterSaveRecord> CabHeaters = new List<CabHeaterSaveRecord>();
+        private readonly Dictionary<string, int> playerIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> heaterIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         public SurvivalPlayerRecord GetOrCreate(string identityId, string displayName, SurvivalTuning tuning)
         {
-            var record = Players.FirstOrDefault(p =>
-                string.Equals(p.IdentityId, identityId, StringComparison.OrdinalIgnoreCase));
+            SurvivalPlayerRecord record = null;
+            for (int i = 0; i < Players.Count; i++)
+                if (string.Equals(Players[i].IdentityId, identityId, StringComparison.OrdinalIgnoreCase))
+                { record = Players[i]; break; }
             if (record == null)
             {
                 record = new SurvivalPlayerRecord
@@ -60,8 +64,10 @@ namespace DVSurvival.Mod
         public float GetCabHeater(string carId)
         {
             if (string.IsNullOrWhiteSpace(carId) || CabHeaters == null) return 0f;
-            var record = CabHeaters.FirstOrDefault(value => value != null &&
-                string.Equals(value.CarId, carId, StringComparison.OrdinalIgnoreCase));
+            CabHeaterSaveRecord record = null;
+            for (int i = 0; i < CabHeaters.Count; i++)
+                if (CabHeaters[i] != null && string.Equals(CabHeaters[i].CarId, carId, StringComparison.OrdinalIgnoreCase))
+                { record = CabHeaters[i]; break; }
             return record == null ? 0f : record.EffectiveLevel;
         }
 
@@ -93,10 +99,19 @@ namespace DVSurvival.Mod
             if (!Guid.TryParse(SessionId, out sessionGuid) || sessionGuid == Guid.Empty)
                 SessionId = Guid.NewGuid().ToString("D");
             if (Players == null) Players = new List<SurvivalPlayerRecord>();
-            Players = Players.Where(p => p != null && !string.IsNullOrWhiteSpace(p.IdentityId))
-                .GroupBy(p => p.IdentityId, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.OrderByDescending(p => p.LastSeenUtcTicks).First())
-                .ToList();
+            playerIndices.Clear();
+            int playerCount = 0;
+            for (int i = 0; i < Players.Count; i++)
+            {
+                var p = Players[i];
+                if (p == null || string.IsNullOrWhiteSpace(p.IdentityId)) continue;
+                int index;
+                if (playerIndices.TryGetValue(p.IdentityId, out index))
+                { if (p.LastSeenUtcTicks > Players[index].LastSeenUtcTicks) Players[index] = p; }
+                else { playerIndices[p.IdentityId] = playerCount; Players[playerCount++] = p; }
+            }
+            if (playerCount < Players.Count) Players.RemoveRange(playerCount, Players.Count - playerCount);
+            playerIndices.Clear();
             foreach (var player in Players)
             {
                 if (player.State == null || !player.State.IsValid())
@@ -104,11 +119,20 @@ namespace DVSurvival.Mod
                 else
                     player.State.Clamp();
             }
-            CabHeaters = CabHeaters.Where(value => value != null &&
-                    !string.IsNullOrWhiteSpace(value.CarId) && value.CarId.Length <= 80)
-                .GroupBy(value => value.CarId.Trim(), StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.OrderByDescending(value => value.LastSeenUtcTicks).First())
-                .ToList();
+            heaterIndices.Clear();
+            int heaterCount = 0;
+            for (int i = 0; i < CabHeaters.Count; i++)
+            {
+                var value = CabHeaters[i];
+                if (value == null || string.IsNullOrWhiteSpace(value.CarId) || value.CarId.Length > 80) continue;
+                var id = value.CarId.Trim();
+                int index;
+                if (heaterIndices.TryGetValue(id, out index))
+                { if (value.LastSeenUtcTicks > CabHeaters[index].LastSeenUtcTicks) CabHeaters[index] = value; }
+                else { heaterIndices[id] = heaterCount; CabHeaters[heaterCount++] = value; }
+            }
+            if (heaterCount < CabHeaters.Count) CabHeaters.RemoveRange(heaterCount, CabHeaters.Count - heaterCount);
+            heaterIndices.Clear();
             Prune();
             PruneCabHeaters();
         }
